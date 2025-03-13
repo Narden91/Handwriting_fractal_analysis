@@ -1,12 +1,8 @@
-"""
-This is the demo code that uses hydra to access the parameters in under the directory config.
-"""
-
 import hydra
 from omegaconf import DictConfig
 
 
-@hydra.main(config_path="../config", config_name="main", version_base="1.2")
+@hydra.main(config_path="./config", config_name="main", version_base="1.2")
 def process_data(config: DictConfig):
     """Function to process the data"""
 
