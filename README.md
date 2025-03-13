@@ -50,9 +50,6 @@ source venv/bin/activate
 .\venv\Scripts\activate
 ```
 3. Install dependencies:
-- To install all dependencies, run:
-```bash
-pip install -r requirements-dev.txt
 ```
 - To install only production dependencies, run:
 ```bash
@@ -67,7 +64,7 @@ pip install <package-name>
 ## View and alter configurations
 To view the configurations associated with a Pythons script, run the following command:
 ```bash
-python src/process.py --help
+python main.py
 ```
 Output:
 ```yaml
@@ -90,20 +87,5 @@ process:
 model:
   name: model1
 data:
-  raw: data/raw/sample.csv
-  processed: data/processed/processed.csv
-  final: data/final/final.csv
-```
-
-To alter the configurations associated with a Python script from the command line, run the following:
-```bash
-python src/process.py data.raw=sample2.csv
-```
-
-## Auto-generate API documentation
-
-To auto-generate API document for your project, run:
-
-```bash
-make docs
+  path: to/filename/path
 ```
