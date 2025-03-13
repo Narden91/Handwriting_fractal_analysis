@@ -1,5 +1,6 @@
 import hydra
 from omegaconf import DictConfig
+from rich import print
 
 
 @hydra.main(config_path="./config", config_name="main", version_base="1.2")
