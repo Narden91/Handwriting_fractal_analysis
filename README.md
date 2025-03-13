@@ -1,4 +1,4 @@
-# Template Data Science ML
+# Handwriting Fractal Analzyzer
 
 ## Tools used in this project
 * [hydra](https://hydra.cc/): Manage configuration files 
