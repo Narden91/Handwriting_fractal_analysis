@@ -9,6 +9,7 @@ data:
   extensions: ['.jpg', '.jpeg', '.png', '.bmp']
   max_display: 5
 
+
 fractal:
   box_sizes: [2, 4, 8, 16, 32]
 
