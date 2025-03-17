@@ -32,7 +32,7 @@ def main(config: DictConfig):
     # --- SETUP ---
     # Display header
     console.print(Panel.fit(
-        f"🔍 [bold]Fractal Analysis Process[/bold]", 
+        f"🔍 [bold]Fractal Analysis[/bold]", 
         subtitle=f"Target: [cyan]{config.data.path}[/cyan]",
         border_style="blue"
     ))
@@ -58,10 +58,12 @@ def main(config: DictConfig):
     verbose_print(f"[dim]Results will be saved to: {results_path}[/dim]", 
                  min_level=2, current_level=config.display.verbosity)
 
+    console.print("\n")
+    console.rule("[bold green] Starting Images Processing [/bold green]")
 
     # Loop through each TASK_** folder
     for task_folder in data_path.glob("TASK*"):
-        if task_folder.is_dir():  # Ensure it's a directory
+        if task_folder.is_dir():
             t = task_folder.name
             print(f"Processing task: {t}...")
 
@@ -96,10 +98,6 @@ def main(config: DictConfig):
                             verbose_print(f"[dim]Analysis complete with {len(features)} features extracted[/dim]",
                                          min_level=2, current_level=config.display.verbosity)
 
-                        # --- RESULTS DISPLAY ---
-                        console.print("\n")
-                        console.rule("[bold green]Fractal Analysis Results[/bold green]")
-
                         # Categorize features
                         fractal_features = {k: v for k, v in features.items() if k.startswith('fractal_')}
                         lacunarity_features = {k: v for k, v in features.items() if k.startswith('lacunarity_')}
@@ -123,12 +121,13 @@ def main(config: DictConfig):
                         t_feature_dicts.append(features)
 
                         # Display summary
-                        summary = Table.grid()
-                        summary.add_row(
-                            f"Extracted [bold cyan]{len(fractal_features)}[/bold cyan] fractal features and "
-                            f"[bold cyan]{len(lacunarity_features)}[/bold cyan] lacunarity features"
-                        )
-                        console.print(Panel(summary, title="📊 Analysis Summary", border_style="blue"))
+                        if config.display.verbosity >= 1:
+                            summary = Table.grid()
+                            summary.add_row(
+                                f"Extracted [bold cyan]{len(fractal_features)}[/bold cyan] fractal features and "
+                                f"[bold cyan]{len(lacunarity_features)}[/bold cyan] lacunarity features"
+                            )
+                            console.print(Panel(summary, title="📊 Analysis Summary", border_style="blue"))
 
                     except Exception as e:
                         # Display error with appropriate verbosity
@@ -155,47 +154,6 @@ def main(config: DictConfig):
                 print("The number of ids does not match the number of rows in t_feature_dicts.")
         else:
             print("t_feature_dicts does not exist or is empty.")
-
-
-
-    # # --- IMAGE FINDING ---
-    # # Check for specified test image
-    # test_image_path = data_path / config.data.test_image
-    #
-    # # If test image doesn't exist, find alternatives
-    # if not test_image_path.exists():
-    #     with console.status("[yellow]Looking for image files...[/yellow]", spinner="dots"):
-    #         verbose_print("[yellow]Test image not found at[/yellow] " + str(test_image_path),
-    #                      min_level=1, current_level=config.display.verbosity)
-    #         verbose_print("[yellow]Searching for any image file in the data directory...[/yellow]",
-    #                      min_level=1, current_level=config.display.verbosity)
-    #
-    #         # Find image files using utility function
-    #         found_image, found_image_path, image_tree = find_image_files(
-    #             data_path,
-    #             config.data.extensions,
-    #             config.data.max_display,
-    #             config.display.verbosity
-    #         )
-    #
-    #         if found_image:
-    #             test_image_path = found_image_path
-    #             # Only show the tree in normal or verbose mode
-    #             if config.display.verbosity >= 1:
-    #                 console.print(image_tree)
-    #             console.print(f"[green]✓ Using image:[/green] [bold cyan]{test_image_path}[/bold cyan]")
-    #         else:
-    #             console.print(Panel(
-    #                 "No image files found in the data directory!",
-    #                 title="❌ Error",
-    #                 border_style="red"
-    #             ))
-    #             return
-    # else:
-    #     verbose_print(f"[green]✓ Using specified test image:[/green] [bold cyan]{test_image_path}[/bold cyan]",
-    #                  min_level=1, current_level=config.display.verbosity)
-    
-
 
 
 if __name__ == "__main__":
