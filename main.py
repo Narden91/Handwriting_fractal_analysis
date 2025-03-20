@@ -20,6 +20,7 @@ from src.utils import (
 )
 from rich.panel import Panel
 from rich.table import Table
+from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn, SpinnerColumn
 
 
 @hydra.main(config_path="./config", config_name="main", version_base="1.2")
@@ -58,21 +59,48 @@ def main(config: DictConfig):
     console.print("\n")
     console.rule("[bold green] Starting Images Processing [/bold green]")
 
+    # Create custom progress bar columns
+    progress_columns = [
+        SpinnerColumn(),
+        TextColumn("[bold blue]{task.description}[/bold blue]"),
+        BarColumn(bar_width=None),
+        TaskProgressColumn(),
+        TextColumn("•"),
+        TimeRemainingColumn(),
+    ]
+
     # Loop through each TASK_** folder
     for task_folder in data_path.glob("TASK*"):
         if task_folder.is_dir():
             t = task_folder.name
-            print(f"Processing task: {t}...")
+            console.print(f"[bold]Processing task:[/bold] [cyan]{t}[/cyan]")
 
             t_feature_dicts = []
             ids = []
 
-            for image_path in task_folder.glob("*.*"):  # Loop through all images
-                id = image_path.name.split(".")[0]
-                ids.append(id)
+            # Get all image files in this task folder
+            image_files = [f for f in task_folder.glob("*.*") 
+                          if f.suffix.lower() in config.data.extensions]
+            
+            # Skip empty folders
+            if not image_files:
+                console.print(f"[yellow]No images found in {t}[/yellow]")
+                continue
+                
+            # Create progress bar for this task
+            with Progress(*progress_columns, console=console) as progress:
+                # Create a task with the total number of images
+                task_id = progress.add_task(f"Analyzing {t}", total=len(image_files))
+                
+                # Process each image with progress tracking
+                for image_path in image_files:
+                    # Extract ID from filename
+                    id = image_path.name.split(".")[0]
+                    ids.append(id)
+                    
+                    # Update description to show current file
+                    progress.update(task_id, description=f"Analyzing {image_path.name}")
 
-                if image_path.suffix.lower() in config.data.extensions:
-                    print(f"image path: {image_path}")
                     # --- FRACTAL ANALYSIS ---
                     # Show box sizes in normal or verbose mode
                     box_sizes = config.fractal.box_sizes
@@ -88,12 +116,11 @@ def main(config: DictConfig):
 
                     # Run analysis
                     try:
-                        with console.status(f"[bold blue]Analyzing image...[/bold blue]", spinner=config.display.spinner):
-                            verbose_print(f"Processing: [bold cyan]{image_path.name}[/bold cyan]",
-                                         min_level=1, current_level=config.display.verbosity)
-                            features = analyzer.analyze_image(image_path)
-                            verbose_print(f"[dim]Analysis complete with {len(features)} features extracted[/dim]",
-                                         min_level=2, current_level=config.display.verbosity)
+                        verbose_print(f"Processing: [bold cyan]{image_path.name}[/bold cyan]",
+                                     min_level=1, current_level=config.display.verbosity)
+                        features = analyzer.analyze_image(image_path)
+                        verbose_print(f"[dim]Analysis complete with {len(features)} features extracted[/dim]",
+                                     min_level=2, current_level=config.display.verbosity)
 
                         # Categorize features
                         fractal_features = {k: v for k, v in features.items() if k.startswith('fractal_')}
@@ -108,13 +135,7 @@ def main(config: DictConfig):
                             lacunarity_table = create_result_table("Lacunarity Features", lacunarity_features)
                             console.print(lacunarity_table)
 
-                        # --- SAVE RESULTS ---
-                        # save_results(
-                        #     features,
-                        #     results_path,
-                        #     config.results.output_file,
-                        #     config.display.verbosity
-                        # )
+                        # Add features to task list
                         t_feature_dicts.append(features)
 
                         # Display summary
@@ -129,28 +150,33 @@ def main(config: DictConfig):
                     except Exception as e:
                         # Display error with appropriate verbosity
                         display_error(e, config.display.theme, config.display.verbosity)
+                    
+                    # Advance the progress bar
+                    progress.advance(task_id)
 
-        # After processing all images, convert the list of dictionaries into a DataFrame
-        # Check if t_feature_dicts exists
-        labels = list(map(lambda x: 1 if "PT" in x else 0, ids))
-        if 't_feature_dicts' in locals() and t_feature_dicts:
-            if len(ids) == len(t_feature_dicts):
-                # Create DataFrame from t_feature_dicts
-                df = pd.DataFrame(t_feature_dicts)
+            # After processing all images, convert the list of dictionaries into a DataFrame
+            # Check if t_feature_dicts exists
+            labels = list(map(lambda x: 1 if "PT" in x else 0, ids))
+            if 't_feature_dicts' in locals() and t_feature_dicts:
+                if len(ids) == len(t_feature_dicts):
+                    # Create DataFrame from t_feature_dicts
+                    df = pd.DataFrame(t_feature_dicts)
 
-                # Add 'Id' as the first column
-                df.insert(0, 'Id', ids)
+                    # Add 'Id' as the first column
+                    df.insert(0, 'Id', ids)
 
-                # Add 'Class' as the last column
-                df['Class'] = labels
+                    # Add 'Class' as the last column
+                    df['Class'] = labels
 
-                # Save the DataFrame
-                df.to_csv(results_path / (t + '_feature_dicts.csv'), index=False)
-                print(f"Results will be saved to: {results_path / (t + '_feature_dicts.csv')}")
+                    # Save the DataFrame
+                    output_file = results_path / (t + '_feature_dicts.csv')
+                    df.to_csv(output_file, index=False)
+                    console.print(f"[green]Results saved to:[/green] [bold cyan]{output_file}[/bold cyan]")
+                else:
+                    console.print("[yellow]Warning:[/yellow] The number of ids does not match the number of rows in t_feature_dicts.")
             else:
-                print("The number of ids does not match the number of rows in t_feature_dicts.")
-        else:
-            print("t_feature_dicts does not exist or is empty.")
+                console.print("[yellow]Warning:[/yellow] No feature dictionaries were created.")
+                
 
 
 if __name__ == "__main__":

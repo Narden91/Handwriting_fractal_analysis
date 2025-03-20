@@ -7,6 +7,7 @@ from rich.table import Table
 from rich.box import SIMPLE
 from rich.tree import Tree
 from rich.syntax import Syntax
+from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn, SpinnerColumn
 from pathlib import Path
 import traceback
 
@@ -132,3 +133,47 @@ def save_results(features, results_path, output_file, verbosity):
     ))
     
     return results_file
+
+def create_progress_columns():
+    """Create standard progress bar columns for consistent display.
+    
+    Returns:
+        List of Rich progress columns
+    """
+    return [
+        SpinnerColumn(),
+        TextColumn("[bold blue]{task.description}[/bold blue]"),
+        BarColumn(bar_width=None),
+        TaskProgressColumn(),
+        TextColumn("•"),
+        TimeRemainingColumn(),
+    ]
+
+def process_with_progress(iterable, description, callback_fn):
+    """Process items with a progress bar.
+    
+    Args:
+        iterable: Items to process
+        description: Progress bar description
+        callback_fn: Function to call for each item
+        
+    Returns:
+        List of results from callback_fn
+    """
+    results = []
+    
+    with Progress(*create_progress_columns(), console=console) as progress:
+        task_id = progress.add_task(description, total=len(iterable))
+        
+        for item in iterable:
+            # Update description to show current item
+            progress.update(task_id, description=f"{description}: {item}")
+            
+            # Process the item
+            result = callback_fn(item)
+            results.append(result)
+            
+            # Advance the progress bar
+            progress.advance(task_id)
+    
+    return results
