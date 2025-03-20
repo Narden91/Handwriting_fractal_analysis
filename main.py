@@ -7,11 +7,8 @@ from omegaconf import DictConfig
 import sys
 import pandas as pd
 from pathlib import Path
-
-# Don't create __pycache__ folders
 sys.dont_write_bytecode = True
 
-# Import FractalAnalyzer and utility functions
 from src.fractal_analyzer.fractal_analyzer import FractalAnalyzer
 from src.utils import (
     console, 
