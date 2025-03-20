@@ -110,7 +110,11 @@ def main(config: DictConfig):
                         console.print(box_table)
 
                     # Initialize analyzer
-                    analyzer = FractalAnalyzer(box_sizes=box_sizes)
+                    analyzer = FractalAnalyzer(
+                                    box_sizes=config.fractal.box_sizes,
+                                    min_black_ratio=config.fractal.get('min_black_ratio', 0.1),
+                                    config=dict(config)
+                                )
                     verbose_print(f"[dim]Initialized FractalAnalyzer with {len(box_sizes)} box sizes[/dim]",
                                  min_level=2, current_level=config.display.verbosity)
 
@@ -177,7 +181,8 @@ def main(config: DictConfig):
             else:
                 console.print("[yellow]Warning:[/yellow] No feature dictionaries were created.")
                 
-
+        # return
+                
 
 if __name__ == "__main__":
     main()

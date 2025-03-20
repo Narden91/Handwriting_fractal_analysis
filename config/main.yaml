@@ -9,24 +9,25 @@ data:
 
 fractal:
   box_sizes: [2, 4, 8, 16, 32]
+  min_black_ratio: 0.1
   
 multifractal:
   q_values: [-5, -3, -1, 0, 1, 3, 5]
-  enabled: true
+  enabled: false  # Set to false to disable
 
 directional:
   angles: [0, 45, 90, 135]
-  enabled: true
+  enabled: false  # Set to false to disable
 
 stroke_analysis:
-  enabled: true
+  enabled: false  # Set to false to disable
 
 topological:
-  enabled: true
+  enabled: false  # Set to false to disable
 
 spatial:
   grid_size: 3
-  enabled: true
+  enabled: false  # Set to false to disable
 
 results:
   path: handwriting_features/

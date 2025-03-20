@@ -11,16 +11,22 @@ class FractalAnalyzer:
     with multi-scale box counting methods.
     """
     
-    def __init__(self, box_sizes=None):
+    def __init__(self, box_sizes=None, min_black_ratio=0.1, config=None):
         """
-        Initialize the FractalAnalyzer with specified box sizes.
+        Initialize the FractalAnalyzer with specified parameters.
         
         Parameters:
         -----------
         box_sizes : array-like, optional
             Box sizes to use for analysis. Default is [2, 4, 8, 16, 32].
+        min_black_ratio : float, optional
+            Minimum ratio of black pixels required for a box to be considered informative.
+        config : dict, optional
+            Configuration dictionary containing feature extraction flags.
         """
         self.box_sizes = np.array(box_sizes) if box_sizes is not None else np.array([2, 4, 8, 16, 32])
+        self.min_black_ratio = min_black_ratio
+        self.config = config or {}
     
     def preprocess_image(self, image_path):
         """
@@ -57,7 +63,7 @@ class FractalAnalyzer:
         
         return binary_image
     
-    def _box_counting(self, binary_image, box_size):
+    def _box_counting(self, binary_image, box_size, min_black_ratio=0.1):
         """
         Apply box counting method for a specific box size.
         
@@ -67,6 +73,8 @@ class FractalAnalyzer:
             Binary image to analyze.
         box_size : int
             Size of the box for counting.
+        min_black_ratio : float
+            Minimum ratio of black pixels required for a box to be considered informative.
             
         Returns:
         --------
@@ -84,7 +92,7 @@ class FractalAnalyzer:
                 return 1, np.array([total_pixels])
             else:
                 return 0, np.array([0])
-                
+                    
         # Ensure image dimensions are divisible by box_size
         h_pad = (box_size - h % box_size) % box_size
         w_pad = (box_size - w % box_size) % box_size
@@ -101,14 +109,111 @@ class FractalAnalyzer:
             raise ValueError(f"Error reshaping image for box size {box_size}: {e}")
         
         # Count foreground pixels in each box
-        box_densities = np.sum(reshaped > 0, axis=(1, 3))
+        box_black_counts = np.sum(reshaped > 0, axis=(1, 3))
+        box_totals = box_size * box_size
+        box_densities = box_black_counts / box_totals
         
-        # Count boxes with at least one foreground pixel
-        box_count = np.sum(box_densities > 0)
+        # Filter boxes based on min_black_ratio
+        valid_boxes_mask = box_densities >= min_black_ratio
+        valid_box_densities = box_densities[valid_boxes_mask]
         
-        return box_count, box_densities
+        # Count valid boxes
+        box_count = np.sum(valid_boxes_mask)
+        
+        # Return the same signature as before, but with filtered densities
+        return box_count, valid_box_densities
     
-    def calculate_fractal_measures(self, binary_image):
+    def _calculate_box_statistics(self, binary_image, box_size, min_black_ratio=0.1):
+        """
+        Calculate detailed statistics for boxes at a specific size.
+        
+        Parameters:
+        -----------
+        binary_image : ndarray
+            Binary image to analyze.
+        box_size : int
+            Size of the box for analysis.
+        min_black_ratio : float
+            Minimum ratio of black pixels required for a box to be considered.
+            
+        Returns:
+        --------
+        stats : dict
+            Dictionary containing box statistics.
+        """
+        h, w = binary_image.shape
+        
+        # Handle edge case: box size larger than image
+        if box_size > h or box_size > w:
+            total_pixels = np.sum(binary_image > 0)
+            total_area = h * w
+            ratio = total_pixels / total_area if total_area > 0 else 0
+            
+            if ratio >= min_black_ratio:
+                return {
+                    'min': ratio,
+                    'max': ratio,
+                    'mean': ratio,
+                    'std': 0,
+                    'count': 1,
+                    'filtered_count': 1 if ratio >= min_black_ratio else 0
+                }
+            else:
+                return {
+                    'min': 0,
+                    'max': 0,
+                    'mean': 0,
+                    'std': 0,
+                    'count': 1,
+                    'filtered_count': 0
+                }
+        
+        # Ensure image dimensions are divisible by box_size
+        h_pad = (box_size - h % box_size) % box_size
+        w_pad = (box_size - w % box_size) % box_size
+        if h_pad > 0 or w_pad > 0:
+            binary_image = np.pad(binary_image, ((0, h_pad), (0, w_pad)), mode='constant')
+        
+        h, w = binary_image.shape
+        
+        # Reshape to group pixels into boxes
+        try:
+            reshaped = binary_image.reshape(h // box_size, box_size, w // box_size, box_size)
+        except ValueError as e:
+            raise ValueError(f"Error reshaping image for box size {box_size}: {e}")
+        
+        # Calculate black pixel densities for each box
+        box_black_counts = np.sum(reshaped > 0, axis=(1, 3))
+        box_totals = box_size * box_size
+        box_densities = box_black_counts / box_totals
+        
+        # Filter out non-informative boxes
+        informative_boxes = box_densities >= min_black_ratio
+        informative_densities = box_densities[informative_boxes] if np.any(informative_boxes) else np.array([])
+        
+        stats = {}
+        if len(informative_densities) > 0:
+            stats['min'] = np.min(informative_densities)
+            stats['max'] = np.max(informative_densities)
+            stats['mean'] = np.mean(informative_densities)
+            stats['std'] = np.std(informative_densities)
+        else:
+            stats['min'] = 0
+            stats['max'] = 0
+            stats['mean'] = 0
+            stats['std'] = 0
+        
+        stats['count'] = box_densities.size
+        stats['filtered_count'] = len(informative_densities)
+        
+        # Calculate informativeness ratio
+        stats['informative_ratio'] = (
+            stats['filtered_count'] / stats['count'] if stats['count'] > 0 else 0
+        )
+        
+        return stats
+    
+    def calculate_fractal_measures(self, binary_image, min_black_ratio=0.1):
         """
         Calculate fractal measures for all specified box sizes.
         
@@ -116,6 +221,8 @@ class FractalAnalyzer:
         -----------
         binary_image : ndarray
             Binary image to analyze.
+        min_black_ratio : float
+            Minimum ratio of black pixels required for a box to be considered.
             
         Returns:
         --------
@@ -126,9 +233,16 @@ class FractalAnalyzer:
         h, w = binary_image.shape
         image_area = h * w
         
+        # Cross-scale statistics collection
+        all_box_stats = {
+            'densities': [],
+            'box_sizes': []
+        }
+        
         for box_size in self.box_sizes:
             try:
-                box_count, _ = self._box_counting(binary_image, box_size)
+                # Get standard measures (maintains original signature)
+                box_count, box_densities = self._box_counting(binary_image, box_size, min_black_ratio)
                 
                 # Raw box count - number of boxes containing handwriting
                 fractal_dict[f"fractal_count_r{box_size}"] = int(box_count)
@@ -144,6 +258,23 @@ class FractalAnalyzer:
                 fractal_dict[f"fractal_log_count_r{box_size}"] = np.log(box_count) if box_count > 0 else 0
                 fractal_dict[f"fractal_log_size_r{box_size}"] = np.log(box_size)
                 
+                # Calculate detailed box statistics
+                box_stats = self._calculate_box_statistics(binary_image, box_size, min_black_ratio)
+                
+                # Add box statistics for this scale
+                fractal_dict[f"fractal_box_min_r{box_size}"] = box_stats['min']
+                fractal_dict[f"fractal_box_max_r{box_size}"] = box_stats['max']
+                fractal_dict[f"fractal_box_mean_r{box_size}"] = box_stats['mean']
+                fractal_dict[f"fractal_box_std_r{box_size}"] = box_stats['std']
+                fractal_dict[f"fractal_valid_boxes_r{box_size}"] = box_stats['filtered_count']
+                fractal_dict[f"fractal_total_boxes_r{box_size}"] = box_stats['count']
+                fractal_dict[f"fractal_informative_ratio_r{box_size}"] = box_stats['informative_ratio']
+                
+                # Collect data for cross-scale statistics
+                if box_stats['filtered_count'] > 0:
+                    all_box_stats['densities'].extend([box_stats['min'], box_stats['max'], box_stats['mean']])
+                    all_box_stats['box_sizes'].extend([box_size] * 3)
+                
             except Exception as e:
                 # Log error and set default values
                 print(f"Error calculating fractal measures for box size {box_size}: {e}")
@@ -151,6 +282,21 @@ class FractalAnalyzer:
                 fractal_dict[f"fractal_density_r{box_size}"] = 0
                 fractal_dict[f"fractal_log_count_r{box_size}"] = 0
                 fractal_dict[f"fractal_log_size_r{box_size}"] = np.log(box_size)
+                fractal_dict[f"fractal_box_min_r{box_size}"] = 0
+                fractal_dict[f"fractal_box_max_r{box_size}"] = 0
+                fractal_dict[f"fractal_box_mean_r{box_size}"] = 0
+                fractal_dict[f"fractal_box_std_r{box_size}"] = 0
+                fractal_dict[f"fractal_valid_boxes_r{box_size}"] = 0
+                fractal_dict[f"fractal_total_boxes_r{box_size}"] = 0
+                fractal_dict[f"fractal_informative_ratio_r{box_size}"] = 0
+        
+        # Add cross-scale statistics
+        if all_box_stats['densities']:
+            densities = np.array(all_box_stats['densities'])
+            fractal_dict["fractal_all_scales_min"] = np.min(densities)
+            fractal_dict["fractal_all_scales_max"] = np.max(densities)
+            fractal_dict["fractal_all_scales_mean"] = np.mean(densities)
+            fractal_dict["fractal_all_scales_std"] = np.std(densities)
         
         # Calculate fractal dimension using log-log slope
         if len(self.box_sizes) >= 2:
@@ -189,10 +335,23 @@ class FractalAnalyzer:
                 fractal_dict["fractal_dimension"] = 0
         else:
             fractal_dict["fractal_dimension"] = 0
+            
+            # Add overall informativeness ratio
+        total_informative_boxes = sum(
+            fractal_dict.get(f"fractal_valid_boxes_r{box_size}", 0) 
+            for box_size in self.box_sizes
+        )
+        total_boxes = sum(
+            fractal_dict.get(f"fractal_total_boxes_r{box_size}", 0) 
+            for box_size in self.box_sizes
+        )
+        fractal_dict["fractal_overall_informative_ratio"] = (
+            total_informative_boxes / total_boxes if total_boxes > 0 else 0
+        )
         
         return fractal_dict
     
-    def calculate_lacunarity_measures(self, binary_image):
+    def calculate_lacunarity_measures(self, binary_image, min_black_ratio=0.1):
         """
         Calculate lacunarity measures for all specified box sizes.
         
@@ -200,6 +359,8 @@ class FractalAnalyzer:
         -----------
         binary_image : ndarray
             Binary image to analyze.
+        min_black_ratio : float
+            Minimum ratio of black pixels required for a box to be considered.
             
         Returns:
         --------
@@ -208,72 +369,102 @@ class FractalAnalyzer:
         """
         lacunarity_dict = {}
         
+        # For cross-scale statistics
+        all_lacunarity_values = []
+        all_entropy_values = []
+        
         for box_size in self.box_sizes:
             try:
-                _, box_densities = self._box_counting(binary_image, box_size)
+                # Get box densities using original signature
+                _, box_densities = self._box_counting(binary_image, box_size, min_black_ratio)
                 
-                # Flatten and filter to consider only non-empty boxes
-                flat_densities = box_densities.flatten()
+                # Calculate box statistics
+                box_stats = self._calculate_box_statistics(binary_image, box_size, min_black_ratio)
                 
                 # Standard lacunarity calculation
-                if len(flat_densities) > 0:
+                if len(box_densities) > 0:
                     # Calculate standard lacunarity: Λ(r) = σ²(r) / μ(r)²
-                    # For all boxes (including empty ones)
-                    mean_all = np.mean(flat_densities)
-                    variance_all = np.var(flat_densities)
-                    lacunarity_all = variance_all / (mean_all**2) if mean_all > 0 else 0
-                    lacunarity_dict[f"lacunarity_all_r{box_size}"] = lacunarity_all
+                    mean = np.mean(box_densities)
+                    variance = np.var(box_densities)
                     
-                    # Gap ratio - proportion of empty boxes
-                    total_boxes = len(flat_densities)
-                    filled_boxes = np.sum(flat_densities > 0)
-                    empty_boxes = total_boxes - filled_boxes
-                    gap_ratio = empty_boxes / total_boxes if total_boxes > 0 else 0
+                    # Standard lacunarity
+                    lacunarity = variance / (mean**2) if mean > 0 else 0
+                    lacunarity_dict[f"lacunarity_r{box_size}"] = lacunarity
+                    all_lacunarity_values.append(lacunarity)
+                    
+                    # Coefficient of variation - standardized measure of dispersion
+                    cv = np.std(box_densities) / mean if mean > 0 else 0
+                    lacunarity_dict[f"lacunarity_cv_r{box_size}"] = cv
+                    
+                    # Gap ratio - based on box statistics
+                    h, w = binary_image.shape
+                    max_possible_boxes = ((h // box_size) * (w // box_size)) if box_size <= min(h, w) else 1
+                    gap_ratio = 1 - (box_stats['filtered_count'] / max_possible_boxes) if max_possible_boxes > 0 else 0
                     lacunarity_dict[f"lacunarity_gap_ratio_r{box_size}"] = gap_ratio
                     
-                    # Consider only filled boxes for these measures
-                    filled_box_densities = flat_densities[flat_densities > 0]
-                    if len(filled_box_densities) > 0:
-                        mean = np.mean(filled_box_densities)
-                        variance = np.var(filled_box_densities)
-                        
-                        # Standard lacunarity for filled boxes
-                        lacunarity = variance / (mean**2) if mean > 0 else 0
-                        lacunarity_dict[f"lacunarity_r{box_size}"] = lacunarity
-                        
-                        # Coefficient of variation - standardized measure of dispersion
-                        cv = np.std(filled_box_densities) / mean if mean > 0 else 0
-                        lacunarity_dict[f"lacunarity_cv_r{box_size}"] = cv
-                        
-                        # Shannon entropy of box density distribution
-                        # Normalize densities to probabilities
-                        if np.sum(filled_box_densities) > 0:
-                            probs = filled_box_densities / np.sum(filled_box_densities)
-                            entropy = -np.sum(probs * np.log2(probs + 1e-10))
-                            lacunarity_dict[f"lacunarity_entropy_r{box_size}"] = entropy
-                        else:
-                            lacunarity_dict[f"lacunarity_entropy_r{box_size}"] = 0
+                    # Shannon entropy of box density distribution
+                    if np.sum(box_densities) > 0:
+                        probs = box_densities / np.sum(box_densities)
+                        entropy = -np.sum(probs * np.log2(probs + 1e-10))
+                        lacunarity_dict[f"lacunarity_entropy_r{box_size}"] = entropy
+                        all_entropy_values.append(entropy)
                     else:
-                        # No filled boxes
-                        lacunarity_dict[f"lacunarity_r{box_size}"] = 0
-                        lacunarity_dict[f"lacunarity_cv_r{box_size}"] = 0
                         lacunarity_dict[f"lacunarity_entropy_r{box_size}"] = 0
+                    
+                    # Box-level statistics for this scale
+                    lacunarity_dict[f"lacunarity_box_min_r{box_size}"] = box_stats['min']
+                    lacunarity_dict[f"lacunarity_box_max_r{box_size}"] = box_stats['max']
+                    lacunarity_dict[f"lacunarity_box_mean_r{box_size}"] = box_stats['mean']
+                    lacunarity_dict[f"lacunarity_box_std_r{box_size}"] = box_stats['std']
+                    lacunarity_dict[f"lacunarity_valid_boxes_r{box_size}"] = box_stats['filtered_count']
+                    lacunarity_dict[f"lacunarity_informative_ratio_r{box_size}"] = (box_stats['filtered_count'] / box_stats['count'] if box_stats['count'] > 0 else 0)
                 else:
-                    # Empty image or invalid box size
+                    # No valid boxes at this scale
                     lacunarity_dict[f"lacunarity_r{box_size}"] = 0
-                    lacunarity_dict[f"lacunarity_all_r{box_size}"] = 0
-                    lacunarity_dict[f"lacunarity_gap_ratio_r{box_size}"] = 1 if box_size > 0 else 0
+                    lacunarity_dict[f"lacunarity_gap_ratio_r{box_size}"] = 1
                     lacunarity_dict[f"lacunarity_cv_r{box_size}"] = 0
                     lacunarity_dict[f"lacunarity_entropy_r{box_size}"] = 0
+                    lacunarity_dict[f"lacunarity_box_min_r{box_size}"] = 0
+                    lacunarity_dict[f"lacunarity_box_max_r{box_size}"] = 0
+                    lacunarity_dict[f"lacunarity_box_mean_r{box_size}"] = 0
+                    lacunarity_dict[f"lacunarity_box_std_r{box_size}"] = 0
+                    lacunarity_dict[f"lacunarity_valid_boxes_r{box_size}"] = 0
                 
             except Exception as e:
                 # Log error and set default values for this box size
                 print(f"Error calculating lacunarity measures for box size {box_size}: {e}")
                 lacunarity_dict[f"lacunarity_r{box_size}"] = 0
-                lacunarity_dict[f"lacunarity_all_r{box_size}"] = 0
                 lacunarity_dict[f"lacunarity_gap_ratio_r{box_size}"] = 0
                 lacunarity_dict[f"lacunarity_cv_r{box_size}"] = 0
                 lacunarity_dict[f"lacunarity_entropy_r{box_size}"] = 0
+                lacunarity_dict[f"lacunarity_box_min_r{box_size}"] = 0
+                lacunarity_dict[f"lacunarity_box_max_r{box_size}"] = 0
+                lacunarity_dict[f"lacunarity_box_mean_r{box_size}"] = 0
+                lacunarity_dict[f"lacunarity_box_std_r{box_size}"] = 0
+                lacunarity_dict[f"lacunarity_valid_boxes_r{box_size}"] = 0
+        
+        # Add cross-scale statistics
+        if all_lacunarity_values:
+            lac_array = np.array(all_lacunarity_values)
+            lacunarity_dict["lacunarity_all_scales_min"] = np.min(lac_array)
+            lacunarity_dict["lacunarity_all_scales_max"] = np.max(lac_array)
+            lacunarity_dict["lacunarity_all_scales_mean"] = np.mean(lac_array)
+            lacunarity_dict["lacunarity_all_scales_std"] = np.std(lac_array)
+        
+        if all_entropy_values:
+            ent_array = np.array(all_entropy_values)
+            lacunarity_dict["entropy_all_scales_min"] = np.min(ent_array)
+            lacunarity_dict["entropy_all_scales_max"] = np.max(ent_array)
+            lacunarity_dict["entropy_all_scales_mean"] = np.mean(ent_array)
+            lacunarity_dict["entropy_all_scales_std"] = np.std(ent_array)
+        
+        total_informative_boxes = sum(lacunarity_dict.get(f"lacunarity_valid_boxes_r{box_size}", 0)
+                                      for box_size in self.box_sizes)
+        
+        total_boxes = sum(lacunarity_dict.get(f"fractal_total_boxes_r{box_size}", 0) 
+                          for box_size in self.box_sizes)
+        
+        lacunarity_dict["lacunarity_overall_informative_ratio"] = (total_informative_boxes / total_boxes if total_boxes > 0 else 0)
         
         return lacunarity_dict
     
@@ -886,7 +1077,7 @@ class FractalAnalyzer:
     
     def analyze_image(self, image_path):
         """
-        Analyze an image and return combined measures from all feature extractors.
+        Analyze an image and return combined measures based on enabled feature extractors.
         
         Parameters:
         -----------
@@ -896,32 +1087,40 @@ class FractalAnalyzer:
         Returns:
         --------
         features : dict
-            Dictionary containing all extracted features.
+            Dictionary containing all enabled extracted features.
         """
         # Preprocess the image
         binary_image = self.preprocess_image(image_path)
         
-        # Original features
-        fractal_dict = self.calculate_fractal_measures(binary_image)
-        lacunarity_dict = self.calculate_lacunarity_measures(binary_image)
+        # Initialize empty results dictionary
+        features = {}
         
-        # New advanced features
-        multifractal_dict = self.calculate_multifractal_spectrum(binary_image)
-        directional_dict = self.calculate_directional_fractal_measures(binary_image)
-        stroke_dict = self.calculate_stroke_features(binary_image)
-        topological_dict = self.calculate_topological_features(binary_image)
-        spatial_dict = self.calculate_spatial_distribution(binary_image)
+        # Always include base features (fractal and lacunarity)
+        fractal_dict = self.calculate_fractal_measures(binary_image, self.min_black_ratio)
+        lacunarity_dict = self.calculate_lacunarity_measures(binary_image, self.min_black_ratio)
+        features.update(fractal_dict)
+        features.update(lacunarity_dict)
         
-        # Combine all dictionaries
-        features = {
-            **fractal_dict, 
-            **lacunarity_dict,
-            **multifractal_dict,
-            **directional_dict,
-            **stroke_dict,
-            **topological_dict,
-            **spatial_dict
-        }
+        # Conditionally include other feature extractors based on configuration
+        if self.config.get('multifractal', {}).get('enabled', False):
+            multifractal_dict = self.calculate_multifractal_spectrum(binary_image)
+            features.update(multifractal_dict)
+        
+        if self.config.get('directional', {}).get('enabled', False):
+            directional_dict = self.calculate_directional_fractal_measures(binary_image)
+            features.update(directional_dict)
+        
+        if self.config.get('stroke_analysis', {}).get('enabled', False):
+            stroke_dict = self.calculate_stroke_features(binary_image)
+            features.update(stroke_dict)
+        
+        if self.config.get('topological', {}).get('enabled', False):
+            topological_dict = self.calculate_topological_features(binary_image)
+            features.update(topological_dict)
+        
+        if self.config.get('spatial', {}).get('enabled', False):
+            spatial_dict = self.calculate_spatial_distribution(binary_image)
+            features.update(spatial_dict)
         
         return features
 
