@@ -29,7 +29,7 @@ spatial:
   enabled: true
 
 results:
-  path: results/
+  path: handwriting_features/
   output_file: fractal_analysis_results.csv
 
 display:
