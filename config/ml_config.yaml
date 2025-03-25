@@ -9,14 +9,24 @@ data:
 settings: 
   verbose: 1
   debug: True
+  base_seed: 42
+  n_runs: 1 
 
 preprocessing:
   scaler: Robust
 
+# Feature selection configuration
+feature_selection:
+  enabled: False  
+  method: "selectkbest"  
+  k: 0.5  # Number of features to select (int) or proportion (float between 0 and 1)
+  score_func: "mutual_info_classif"  # Scoring function: 'f_classif', 'chi2', 'mutual_info_classif'
+  save_plots: True 
+
 # Hyperparameter tuning configuration
 hyperparameter_tuning:
-  models: ["lgbm"]  # Models to optimize: 'rf' for Random Forest, 'lgbm' for LightGBM, 'mlp' for Multi-layer Perceptron
-  n_trials: 100  # Number of trials for Optuna
-  cv: 5  # Number of cross-validation folds
+  models: ["lgbm"]  # Models: 'rf' for Random Forest, 'lgbm' for LightGBM, 'mlp' for Multi-layer Perceptron
+  n_trials: 50  # Number of trials for Optuna
+  cv: 3  # Number of cross-validation folds
   metric: "accuracy"  # Metric to optimize: 'accuracy', 'f1', 'roc_auc'
   output_dir: "./results"  # Directory to save results

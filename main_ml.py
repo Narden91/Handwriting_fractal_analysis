@@ -2,28 +2,46 @@ import hydra
 from omegaconf import DictConfig
 import sys
 import pandas as pd
+import numpy as np
 from pathlib import Path
-import pickle
-import logging
+import time
+import json
 
 from sklearn.discriminant_analysis import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import RobustScaler
+
 sys.dont_write_bytecode = True
 from rich import print
+from rich.console import Console
+from rich.panel import Panel
 from src.hp_tuning import run_hyperparameter_search
+from src.processing.processing import process_task
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+
+console = Console()
+
 
 @hydra.main(config_path="./config", config_name="ml_config", version_base="1.2")
 def main(config: DictConfig):
+    """Main function to run the ML pipeline."""
+    start_time = time.time()
     
-    # --- SETUP ---
-    # Display header
-    print(f"🔍 [bold]ML Fractal Handwriting Analysis[/bold]")
+    console.print(Panel("[bold cyan]🔍 ML Fractal Handwriting Analysis[/bold cyan]", 
+                      title="Starting Analysis", expand=False))
+    
+    # Print feature selection information if enabled
+    if hasattr(config, 'feature_selection') and config.feature_selection.enabled:
+        fs_method = config.feature_selection.method
+        k_value = config.feature_selection.k
+        score_func = config.feature_selection.get('score_func', 'f_classif')
+        console.print(Panel(f"[bold magenta]Feature Selection: {fs_method.upper()} (k={k_value}, scoring={score_func})[/bold magenta]", 
+                          expand=False))
+    
     verbose = config.settings.verbose
+    debug = config.settings.debug
+    base_seed = config.settings.base_seed
+    n_runs = config.settings.n_runs
     
     data_path = Path(config.data.path)
     features_path = data_path / Path(config.data.feat_folder)
@@ -37,118 +55,135 @@ def main(config: DictConfig):
         "scolarizzazione": "Education",
         "sesso": "Sex"}
     db_info.rename(columns=rename_dict, inplace=True)
-    print(db_info.head()) if verbose > 0 else None
     
-    # Load csv file that starts with 'TASK_'
+    if verbose > 0:
+        console.print(db_info.head())
+    
+    # Load all task files (files that start with 'TASK_')
     task_files = [f for f in features_path.glob("TASK_*.csv")]
+    console.print(f"Found {len(task_files)} task files for processing")
     
-    for i, task in enumerate(task_files):
-        print(f"[bold]Processing Task {i+1}: {task.name}[/bold]")
-        task_df = pd.read_csv(task)
+    # Create main results directory if specified
+    if hasattr(config.hyperparameter_tuning, 'output_dir') and config.hyperparameter_tuning.output_dir:
+        main_output_dir = Path(config.hyperparameter_tuning.output_dir)
+        main_output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Left join with db_info
-        task_df = task_df.merge(db_info, on="Id", how="left")
+        # Create feature selection directory if feature selection is enabled
+        if hasattr(config, 'feature_selection') and config.feature_selection.enabled:
+            fs_dir = main_output_dir / "feature_selection"
+            fs_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Store overall results across runs and tasks
+    overall_results = {}
+    
+    # Perform multiple runs with different seeds
+    for run_idx in range(n_runs):
+        # Generate a unique seed for this run
+        run_seed = base_seed + run_idx * 100  # Ensuring distinct seeds
         
-        # Move Class column to the end
-        class_col = task_df.pop("Class")
-        task_df["Class"] = class_col
+        console.print(Panel(f"[bold]Starting Run {run_idx+1}/{n_runs} with Seed {run_seed}[/bold]", 
+                          expand=False))
         
-        print(task_df.head()) if verbose > 0 else None
+        run_results = {}
         
-        # --- ML ANALYSIS ---
-        # Split data into train and test
-        X_train, X_test, y_train, y_test = train_test_split(
-            task_df.drop("Class", axis=1), task_df["Class"], test_size=0.2, random_state=42, stratify=task_df["Class"])
-        
-        X_train = X_train.drop("Id", axis=1)
-        X_test = X_test.drop("Id", axis=1)
-        
-        if verbose > 0:
-            print(f"X_train: \n {X_train.shape}")
-            print(f"y_train: \n {y_train.shape}")
-            print(f"X_test: \n {X_test.shape}")
-            print(f"y_test: \n {y_test.shape}")
-        
-        # Scale data
-        scaler = StandardScaler() if config.preprocessing.scaler == "Standard" else RobustScaler()
-        
-        # Scale data but not the Work and Sex columns
-        # Extract binary features
-        X_train_no_scale = X_train[["Work", "Sex"]]
-        X_test_no_scale = X_test[["Work", "Sex"]]
-
-        # Remove binary features from the datasets to be scaled
-        X_train_to_scale = X_train.drop(["Work", "Sex"], axis=1)
-        X_test_to_scale = X_test.drop(["Work", "Sex"], axis=1)
-
-        # Store column names for later use
-        scaled_columns = X_train_to_scale.columns
-
-        # Scale the non-binary features
-        X_train_scaled = pd.DataFrame(scaler.fit_transform(X_train_to_scale), 
-                                    columns=scaled_columns, 
-                                    index=X_train_to_scale.index)
-        X_test_scaled = pd.DataFrame(scaler.transform(X_test_to_scale), 
-                                    columns=scaled_columns, 
-                                    index=X_test_to_scale.index)
-        
-        X_train = pd.concat([X_train_scaled.reset_index(drop=True), 
-                            X_train_no_scale.reset_index(drop=True)], axis=1)
-        X_test = pd.concat([X_test_scaled.reset_index(drop=True), 
-                            X_test_no_scale.reset_index(drop=True)], axis=1)
-        
-        print(X_train.head()) if verbose > 0 else None
-        
-        # --- MODEL TRAINING WITH HYPERPARAMETER OPTIMIZATION ---
-        print("[bold]Starting hyperparameter optimization...[/bold]")
-        
-        # Create task-specific output directory
-        task_output_dir = None
-        if config.hyperparameter_tuning.output_dir:
-            task_output_dir = Path(config.hyperparameter_tuning.output_dir) / f"task_{i+1}"
-            task_output_dir.mkdir(parents=True, exist_ok=True)
+        # Process each task
+        for task_idx, task in enumerate(task_files):
+            task_results = process_task(
+                task, db_info, config, run_seed, run_idx, task_idx)
             
-            # Save the preprocessed datasets for reference
-            X_train.to_csv(task_output_dir / "X_train.csv", index=False)
-            X_test.to_csv(task_output_dir / "X_test.csv", index=False)
-            y_train.to_csv(task_output_dir / "y_train.csv", index=False)
-            y_test.to_csv(task_output_dir / "y_test.csv", index=False)
+            # Store results for all models
+            task_name = task_idx + 1
+            run_results[task_name] = task_results
+            
+            # If in debug mode, only process the first task
+            if debug and task_idx == 0:
+                console.print("[bold yellow]Debug mode: stopping after first task[/bold yellow]")
+                break
         
-        # Update config with task-specific output directory
-        task_config = config.copy()
-        if hasattr(config.hyperparameter_tuning, 'output_dir') and config.hyperparameter_tuning.output_dir:
-            task_config.hyperparameter_tuning.output_dir = str(task_output_dir)
+        # Store run results
+        overall_results[f"run_{run_idx+1}"] = run_results
+            
+    if hasattr(config.hyperparameter_tuning, 'output_dir') and config.hyperparameter_tuning.output_dir:
+        model_metrics = {}
         
-        # Run hyperparameter optimization
-        results = run_hyperparameter_search(task_config, X_train, y_train, X_test, y_test)
+        for model_type in config.hyperparameter_tuning.models:
+            model_metrics[model_type] = []
         
-        # Save results
-        if task_output_dir:
-            # Save best models
-            for model_type, result in results.items():
-                with open(task_output_dir / f"{model_type}_best_model.pkl", "wb") as f:
-                    pickle.dump(result['model'], f)
+        # Loop through all the tasks and runs to collect metrics
+        for run_idx in range(n_runs):
+            run_key = f"run_{run_idx+1}"
+            run_seed = base_seed + run_idx * 100
+            
+            for task_idx, task in enumerate(task_files):
+                task_name = task_idx + 1
                 
-                # Save best parameters
-                with open(task_output_dir / f"{model_type}_best_params.txt", "w") as f:
-                    f.write(f"Best CV score: {result['best_cv_score']:.4f}\n")
-                    f.write(f"Test score: {result['test_score']:.4f}\n\n")
-                    f.write("Best parameters:\n")
-                    for param, value in result['best_params'].items():
-                        f.write(f"{param}: {value}\n")
+                if debug and task_idx > 0:
+                    continue
+                    
+                # For each model type, read the metrics.json file
+                for model_type in config.hyperparameter_tuning.models:
+                    model_dir = Path(config.hyperparameter_tuning.output_dir) / model_type
+                    metrics_file = model_dir / f"run_{run_idx+1}" / f"task_{task_idx+1}" / "metrics.json"
+                    
+                    if metrics_file.exists():
+                        with open(metrics_file, 'r') as f:
+                            metrics = json.load(f)
+                        
+                        metrics['Run'] = run_idx + 1
+                        metrics['Seed'] = run_seed
+                        metrics['Task'] = task_name
+                        
+                        # Add feature selection info if enabled
+                        if hasattr(config, 'feature_selection') and config.feature_selection.enabled:
+                            metrics['FeatureSelectionMethod'] = config.feature_selection.method
+                            metrics['K'] = config.feature_selection.k
+                            metrics['ScoreFunc'] = config.feature_selection.get('score_func', 'f_classif')
+                        
+                        model_metrics[model_type].append(metrics)
         
-        # Find best model overall
-        best_model_type = max(results, key=lambda k: results[k]['test_score'])
-        best_model_score = results[best_model_type]['test_score']
-        
-        print(f"[bold green]Best model for Task {i+1}: {best_model_type} with accuracy {best_model_score:.4f}[/bold green]")
-        print("-" * 80)
-        
-        if i == 0 and 'debug' in config and config.debug:
-            print("[bold yellow]Debug mode: stopping after first task[/bold yellow]")
-            break
-        
-    return
+        # Create only run_performance_summary.csv for each model
+        for model_type, metrics_list in model_metrics.items():
+            if metrics_list:
+                model_dir = Path(config.hyperparameter_tuning.output_dir) / model_type
+                df = pd.DataFrame(metrics_list)
+                
+                # Rename columns
+                column_mapping = {
+                    'accuracy': 'Accuracy',
+                    'precision': 'Precision',
+                    'recall': 'Recall',
+                    'specificity': 'Specificity',
+                    'mcc': 'MCC',
+                    'f1_score': 'F1_score'
+                }
+                df.rename(columns=column_mapping, inplace=True)
+                
+                # Create summary of averages per run
+                metrics_to_aggregate = ['Accuracy', 'Precision', 'Recall', 'Specificity', 'MCC', 'F1_score']
+                
+                available_metrics = [col for col in metrics_to_aggregate if col in df.columns]
+                agg_dict = {metric: ['mean', 'std'] for metric in available_metrics}
+                
+                # Group by Run and calculate statistics
+                run_summary = df.groupby('Run').agg(agg_dict).reset_index()
+                
+                # Flatten multi-level column names
+                run_summary.columns = ['_'.join(col).strip('_') for col in run_summary.columns.values]
+                
+                # Save run summary
+                run_summary.to_csv(model_dir / "run_performance_summary.csv", index=False)
+
+                # If feature selection was used, create a summary comparing performance with feature selection
+                if hasattr(config, 'feature_selection') and config.feature_selection.enabled:
+                    # Save the complete metrics for analysis
+                    df.to_csv(model_dir / "complete_metrics.csv", index=False)
+    
+    # Print execution time
+    end_time = time.time()
+    execution_time = end_time - start_time
+    console.print(f"[bold]Total execution time: {execution_time:.2f} seconds[/bold]")
+    
+    return overall_results
 
 
 if __name__=="__main__":
