@@ -41,12 +41,16 @@ def process_task(task_path, db_info, config, run_seed, run_idx, task_idx):
         task_df.drop("Class", axis=1), task_df["Class"], 
         test_size=0.2, random_state=run_seed, stratify=task_df["Class"])
     
-    # Get IDs before dropping for tracking
-    train_ids = X_train["Id"].copy()
-    test_ids = X_test["Id"].copy()
-    
     X_train = X_train.drop("Id", axis=1)
     X_test = X_test.drop("Id", axis=1)
+    
+    # Check for NaN values
+    if X_train.isnull().sum().sum() > 0 or X_test.isnull().sum().sum() > 0:
+        console.print("[bold red]NaN values found before scaling. Imputing Values[/bold red]")
+        
+        # Impute NaN values with median
+        X_train.fillna(X_train.median(), inplace=True)
+        X_test.fillna(X_test.median(), inplace=True)
     
     # Scale data
     scaler = StandardScaler() if config.preprocessing.scaler == "Standard" else RobustScaler()
@@ -72,6 +76,18 @@ def process_task(task_path, db_info, config, run_seed, run_idx, task_idx):
                         X_train_no_scale.reset_index(drop=True)], axis=1)
     X_test = pd.concat([X_test_scaled.reset_index(drop=True), 
                         X_test_no_scale.reset_index(drop=True)], axis=1)
+    
+    # Check for NaN values
+    if X_train.isnull().sum().sum() > 0 or X_test.isnull().sum().sum() > 0:
+        console.print("[bold red]NaN values found after scaling. Skipping task...[/bold red]")
+        
+        # print the column names with NaN values
+        if X_train.isnull().sum().sum() > 0:
+            console.print("[bold red]NaN values in training data:[/bold red]")
+            console.print(X_train.columns[X_train.isnull().any()].tolist())
+        if X_test.isnull().sum().sum() > 0:
+            console.print("[bold red]NaN values in test data:[/bold red]")
+
     
     # --- FEATURE SELECTION ---
     if hasattr(config, 'feature_selection') and config.feature_selection.enabled:
