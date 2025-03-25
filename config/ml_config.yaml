@@ -1,0 +1,22 @@
+defaults:
+  - _self_
+
+data:
+  path: data/
+  db_info: Subject_db_personal_features.csv
+  feat_folder: Feature_fractal
+
+settings: 
+  verbose: 1
+  debug: True
+
+preprocessing:
+  scaler: Robust
+
+# Hyperparameter tuning configuration
+hyperparameter_tuning:
+  models: ["lgbm"]  # Models to optimize: 'rf' for Random Forest, 'lgbm' for LightGBM, 'mlp' for Multi-layer Perceptron
+  n_trials: 100  # Number of trials for Optuna
+  cv: 5  # Number of cross-validation folds
+  metric: "accuracy"  # Metric to optimize: 'accuracy', 'f1', 'roc_auc'
+  output_dir: "./results"  # Directory to save results
