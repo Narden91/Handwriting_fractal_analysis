@@ -171,9 +171,10 @@ def plot_feature_scores(feature_scores, output_file=None, figsize=(10, 8), top_n
     Returns
     -------
     fig : matplotlib Figure
-        The figure object
+        The figure object (should be closed by the caller when done)
     """
-    plt.figure(figsize=figsize)
+    # Create a new figure with a specific figure number to reference it later
+    fig = plt.figure(figsize=figsize)
     sorted_scores = feature_scores.sort_values('Score', ascending=False).head(top_n)
     
     ax = sns.barplot(x='Score', y='Feature', data=sorted_scores, palette='viridis', 
@@ -191,8 +192,11 @@ def plot_feature_scores(feature_scores, output_file=None, figsize=(10, 8), top_n
     
     if output_file:
         plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        # Close the figure if we're saving it to a file and not returning it
+        if output_file is not None:
+            plt.close(fig)
     
-    return plt.gcf()
+    return fig
 
 def save_feature_selection_results(feature_scores, selected_features, output_dir):
     """
@@ -215,4 +219,5 @@ def save_feature_selection_results(feature_scores, selected_features, output_dir
         for feature in selected_features:
             f.write(f"- {feature}\n")
 
-    plot_feature_scores(feature_scores, output_file=output_dir / "feature_scores.png")
+    fig = plot_feature_scores(feature_scores, output_file=output_dir / "feature_scores.png")
+    plt.close(fig) 

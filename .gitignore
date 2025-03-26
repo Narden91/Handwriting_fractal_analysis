@@ -97,5 +97,5 @@ data/*/*
 
 # Notebooks
 notebooks/*
-results/*
 handwriting_features/*
+res*

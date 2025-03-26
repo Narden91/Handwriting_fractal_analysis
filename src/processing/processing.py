@@ -70,6 +70,7 @@ def process_task(task_path, db_info, config, run_seed, run_idx, task_idx):
                         X_train_no_scale.reset_index(drop=True)], axis=1)
     X_test = pd.concat([X_test_scaled.reset_index(drop=True),
                         X_test_no_scale.reset_index(drop=True)], axis=1)
+    
 
     # --- FEATURE SELECTION ---
     if hasattr(config, 'feature_selection') and config.feature_selection.enabled:

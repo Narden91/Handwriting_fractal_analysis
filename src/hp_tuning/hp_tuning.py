@@ -10,6 +10,9 @@ import lightgbm as lgbm
 from sklearn.metrics import accuracy_score, f1_score, confusion_matrix, classification_report
 from sklearn.metrics import matthews_corrcoef 
 from sklearn.model_selection import cross_val_score, StratifiedKFold
+# Add imports for preprocessing
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
 import logging
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -43,9 +46,19 @@ def suppress_stdout_stderr():
             sys.stdout = old_stdout
             sys.stderr = old_stderr
 
+def check_for_nan(X, name="dataset"):
+    """Helper function to check for NaN values in the dataset."""
+    if np.isnan(X.values).any():
+        logger.warning(f"NaN values found in {name}. Imputation will be applied.")
+        return True
+    return False
+
 def optimize_hyperparameters(model_type, X_train, y_train, n_trials=100, cv=5, metric='accuracy', run_seed=42):
     """Optimize hyperparameters using cross-validation."""
     skf = StratifiedKFold(n_splits=cv, shuffle=True, random_state=run_seed)
+    
+    # Check for NaNs
+    has_nan = check_for_nan(X_train, "training set")
 
     def objective_cv(trial):
         if model_type == 'rf':
@@ -136,12 +149,26 @@ def optimize_hyperparameters(model_type, X_train, y_train, n_trials=100, cv=5, m
         else:
             raise ValueError(f"Unsupported model type: {model_type}")
 
+        # Create model with parameters
         model = model_cls(**params)
+        
+        # If NaN values are present, create a pipeline with imputation
+        if has_nan:
+            # Create imputer
+            imputer = SimpleImputer(strategy='mean')
+            # Create pipeline with imputer and model
+            pipeline = Pipeline(steps=[
+                ('imputer', imputer),
+                ('model', model)
+            ])
+            model_to_evaluate = pipeline
+        else:
+            model_to_evaluate = model
 
         if metric == 'accuracy':
-            scores = cross_val_score(model, X_train, y_train, cv=skf, scoring='accuracy', error_score='raise') 
+            scores = cross_val_score(model_to_evaluate, X_train, y_train, cv=skf, scoring='accuracy', error_score='raise') 
         elif metric == 'f1':
-            scores = cross_val_score(model, X_train, y_train, cv=skf, scoring='f1', error_score='raise') 
+            scores = cross_val_score(model_to_evaluate, X_train, y_train, cv=skf, scoring='f1', error_score='raise') 
 
         return scores.mean()
 
@@ -177,6 +204,13 @@ def evaluate_model(model_type, best_params, X_train, y_train, X_test, y_test, ou
     Returns:
         results: Dictionary with evaluation metrics and feature importances
     """
+    # Check for NaNs in both train and test sets
+    has_nan_train = check_for_nan(X_train, "training set")
+    has_nan_test = check_for_nan(X_test, "test set")
+    
+    # Use imputation if NaNs are found in either dataset
+    use_imputer = has_nan_train or has_nan_test
+    
     # Get model directory from the dictionary if provided
     if output_dir and isinstance(output_dir, dict) and model_type in output_dir:
         model_dir = output_dir[model_type]
@@ -261,9 +295,25 @@ def evaluate_model(model_type, best_params, X_train, y_train, X_test, y_test, ou
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
 
+    # If NaN values are present, create a pipeline with imputation
+    if use_imputer:
+        # Create imputer
+        imputer = SimpleImputer(strategy='mean')
+        # Create pipeline with imputer and model
+        pipeline = Pipeline(steps=[
+            ('imputer', imputer),
+            ('model', model)
+        ])
+        model_to_use = pipeline
+        
+        logger.info(f"Using imputation pipeline for {model_type} due to NaN values in data")
+    else:
+        model_to_use = model
+
     with suppress_stdout_stderr():
-        model.fit(X_train, y_train)
-    y_pred = model.predict(X_test)
+        model_to_use.fit(X_train, y_train)
+    
+    y_pred = model_to_use.predict(X_test)
 
     # Calculate metrics for binary classification
     accuracy = accuracy_score(y_test, y_pred)
@@ -281,9 +331,9 @@ def evaluate_model(model_type, best_params, X_train, y_train, X_test, y_test, ou
     else:
         specificity = 0
 
-    # Try to get feature importances if available
+    # Try to get feature importances if available and not using a pipeline
     feature_importances = None
-    if hasattr(model, 'feature_importances_'):
+    if not use_imputer and hasattr(model, 'feature_importances_'):
         feature_names = X_train.columns
         importances = model.feature_importances_
         indices = np.argsort(importances)[::-1]
@@ -296,7 +346,7 @@ def evaluate_model(model_type, best_params, X_train, y_train, X_test, y_test, ou
         # Save feature importances if model_dir is provided
         if model_dir:
             feature_importances.to_csv(model_dir / "feature_importances.csv", index=False)
-    elif model_type == 'svc':
+    elif not use_imputer and model_type == 'svc':
         if best_params.get('kernel') == 'linear' and hasattr(model, 'coef_'): 
             feature_names = X_train.columns
             importances = np.abs(model.coef_[0]) 
@@ -309,6 +359,35 @@ def evaluate_model(model_type, best_params, X_train, y_train, X_test, y_test, ou
 
             if model_dir:
                 feature_importances.to_csv(model_dir / "feature_importances.csv", index=False)
+    elif use_imputer:
+        # For pipelines, we need to extract the model to get feature importances
+        if hasattr(model_to_use, 'named_steps') and 'model' in model_to_use.named_steps:
+            base_model = model_to_use.named_steps['model']
+            if hasattr(base_model, 'feature_importances_'):
+                feature_names = X_train.columns
+                importances = base_model.feature_importances_
+                indices = np.argsort(importances)[::-1]
+
+                feature_importances = pd.DataFrame({
+                    'Feature': [feature_names[i] for i in indices],
+                    'Importance': [importances[i] for i in indices]
+                })
+
+                # Save feature importances if model_dir is provided
+                if model_dir:
+                    feature_importances.to_csv(model_dir / "feature_importances.csv", index=False)
+            elif model_type == 'svc' and best_params.get('kernel') == 'linear' and hasattr(base_model, 'coef_'):
+                feature_names = X_train.columns
+                importances = np.abs(base_model.coef_[0])
+                indices = np.argsort(importances)[::-1]
+
+                feature_importances = pd.DataFrame({
+                    'Feature': [feature_names[i] for i in indices],
+                    'Importance': [importances[i] for i in indices]
+                })
+
+                if model_dir:
+                    feature_importances.to_csv(model_dir / "feature_importances.csv", index=False)
 
     if model_dir:
         metrics = {
@@ -340,6 +419,13 @@ def run_hyperparameter_search(models_to_optimize, X_train, y_train, X_test, y_te
                              n_trials=100, cv=5, metric='accuracy', output_dir=None, run_seed=42):
     """Run hyperparameter search for the specified models."""
     results = {}
+    
+    # Log NaN check results
+    has_nan_train = check_for_nan(X_train, "training set")
+    has_nan_test = check_for_nan(X_test, "test set")
+    
+    if has_nan_train or has_nan_test:
+        logger.info("NaN values detected in the data. Using SimpleImputer with mean strategy.")
 
     for model_type in models_to_optimize:
         best_params, best_cv_score = optimize_hyperparameters(
