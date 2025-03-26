@@ -1,3 +1,4 @@
+import random
 import hydra
 from omegaconf import DictConfig
 import sys
@@ -6,31 +7,32 @@ import numpy as np
 from pathlib import Path
 import time
 import json
-
-from sklearn.discriminant_analysis import StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import RobustScaler
+import os
 
 sys.dont_write_bytecode = True
 from rich import print
 from rich.console import Console
 from rich.panel import Panel
-from src.hp_tuning import run_hyperparameter_search
 from src.processing.processing import process_task
 
 
 console = Console()
 
 
+def set_global_seeds(seed):
+    """Set all common random seeds for reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+
+
 @hydra.main(config_path="./config", config_name="ml_config", version_base="1.2")
 def main(config: DictConfig):
     """Main function to run the ML pipeline."""
     start_time = time.time()
-    
     console.print(Panel("[bold cyan]🔍 ML Fractal Handwriting Analysis[/bold cyan]", 
                       title="Starting Analysis", expand=False))
     
-    # Print feature selection information if enabled
     if hasattr(config, 'feature_selection') and config.feature_selection.enabled:
         fs_method = config.feature_selection.method
         k_value = config.feature_selection.k
@@ -40,8 +42,10 @@ def main(config: DictConfig):
     
     verbose = config.settings.verbose
     debug = config.settings.debug
-    base_seed = config.settings.base_seed
     n_runs = config.settings.n_runs
+    base_seed = config.settings.base_seed
+    set_global_seeds(base_seed)
+    
     
     data_path = Path(config.data.path)
     features_path = data_path / Path(config.data.feat_folder)
@@ -63,24 +67,15 @@ def main(config: DictConfig):
     task_files = [f for f in features_path.glob("TASK_*.csv")]
     console.print(f"Found {len(task_files)} task files for processing")
     
-    # Create main results directory if specified
     if hasattr(config.hyperparameter_tuning, 'output_dir') and config.hyperparameter_tuning.output_dir:
         main_output_dir = Path(config.hyperparameter_tuning.output_dir)
         main_output_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Create feature selection directory if feature selection is enabled
-        if hasattr(config, 'feature_selection') and config.feature_selection.enabled:
-            fs_dir = main_output_dir / "feature_selection"
-            fs_dir.mkdir(parents=True, exist_ok=True)
     
     # Store overall results across runs and tasks
     overall_results = {}
     
-    # Perform multiple runs with different seeds
     for run_idx in range(n_runs):
-        # Generate a unique seed for this run
-        run_seed = base_seed + run_idx * 100  # Ensuring distinct seeds
-        
+        run_seed = base_seed + run_idx  
         console.print(Panel(f"[bold]Starting Run {run_idx+1}/{n_runs} with Seed {run_seed}[/bold]", 
                           expand=False))
         
@@ -99,8 +94,7 @@ def main(config: DictConfig):
             if debug and task_idx == 0:
                 console.print("[bold yellow]Debug mode: stopping after first task[/bold yellow]")
                 break
-        
-        # Store run results
+                    
         overall_results[f"run_{run_idx+1}"] = run_results
             
     if hasattr(config.hyperparameter_tuning, 'output_dir') and config.hyperparameter_tuning.output_dir:
@@ -111,7 +105,7 @@ def main(config: DictConfig):
         
         # Loop through all the tasks and runs to collect metrics
         for run_idx in range(n_runs):
-            run_key = f"run_{run_idx+1}"
+            # run_key = f"run_{run_idx+1}"
             run_seed = base_seed + run_idx * 100
             
             for task_idx, task in enumerate(task_files):
@@ -160,7 +154,6 @@ def main(config: DictConfig):
                 
                 # Create summary of averages per run
                 metrics_to_aggregate = ['Accuracy', 'Precision', 'Recall', 'Specificity', 'MCC', 'F1_score']
-                
                 available_metrics = [col for col in metrics_to_aggregate if col in df.columns]
                 agg_dict = {metric: ['mean', 'std'] for metric in available_metrics}
                 
@@ -168,9 +161,7 @@ def main(config: DictConfig):
                 run_summary = df.groupby('Run').agg(agg_dict).reset_index()
                 
                 # Flatten multi-level column names
-                run_summary.columns = ['_'.join(col).strip('_') for col in run_summary.columns.values]
-                
-                # Save run summary
+                run_summary.columns = ['_'.join(col).strip('_') for col in run_summary.columns.values]                
                 run_summary.to_csv(model_dir / "run_performance_summary.csv", index=False)
 
                 # If feature selection was used, create a summary comparing performance with feature selection

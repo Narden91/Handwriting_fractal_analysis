@@ -25,7 +25,7 @@ SCORING_FUNCTIONS = {
     'mutual_info_regression': mutual_info_regression  # Mutual information
 }
 
-def select_k_best_features(X, y, k=10, score_func='f_classif', verbose=0):
+def select_k_best_features(X, y, k=10, score_func='f_classif', verbose=0, random_state=None):
     """
     Select top k features using SelectKBest with specified scoring function.
     
@@ -44,6 +44,8 @@ def select_k_best_features(X, y, k=10, score_func='f_classif', verbose=0):
         'f_classif', 'chi2', 'mutual_info_classif', 'f_regression', 'mutual_info_regression'
     verbose : int, default=0
         Controls verbosity of output
+    random_state : int, RandomState instance or None, default=None
+        Controls the randomness of the estimator for mutual_info methods
     
     Returns
     -------
@@ -86,7 +88,15 @@ def select_k_best_features(X, y, k=10, score_func='f_classif', verbose=0):
     # Get scoring function
     if isinstance(score_func, str):
         if score_func in SCORING_FUNCTIONS:
-            score_func = SCORING_FUNCTIONS[score_func]
+            # For mutual information methods, we need to wrap them to pass random_state
+            if score_func == 'mutual_info_classif':
+                original_func = SCORING_FUNCTIONS[score_func]
+                score_func = lambda X, y: original_func(X, y, random_state=random_state)
+            elif score_func == 'mutual_info_regression':
+                original_func = SCORING_FUNCTIONS[score_func]
+                score_func = lambda X, y: original_func(X, y, random_state=random_state)
+            else:
+                score_func = SCORING_FUNCTIONS[score_func]
         else:
             valid_funcs = list(SCORING_FUNCTIONS.keys())
             console.print(f"[red]Error: Unknown scoring function '{score_func}'. Using 'f_classif' instead.[/red]")
@@ -94,7 +104,7 @@ def select_k_best_features(X, y, k=10, score_func='f_classif', verbose=0):
             score_func = f_classif
     
     # Special handling for chi2 which requires non-negative features
-    if score_func == chi2:
+    if score_func == chi2 or (isinstance(score_func, str) and score_func == 'chi2'):
         if verbose > 0:
             console.print("[yellow]Chi2 requires non-negative features. Checking for negative values...[/yellow]")
         
@@ -112,7 +122,8 @@ def select_k_best_features(X, y, k=10, score_func='f_classif', verbose=0):
             console.print("[yellow]Applied min-max scaling to make all features non-negative for chi2.[/yellow]")
     
     if verbose > 0:
-        console.print(f"[bold cyan]Selecting top {k} features using {score_func.__name__}...[/bold cyan]")
+        func_name = score_func.__name__ if hasattr(score_func, '__name__') else str(score_func)
+        console.print(f"[bold cyan]Selecting top {k} features using {func_name}...[/bold cyan]")
     
     # Apply SelectKBest
     selector = SelectKBest(score_func=score_func, k=k)

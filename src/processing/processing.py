@@ -99,12 +99,12 @@ def process_task(task_path, db_info, config, run_seed, run_idx, task_idx):
         fs_output_dir = None
         if hasattr(config.hyperparameter_tuning, 'output_dir') and config.hyperparameter_tuning.output_dir:
             base_dir = Path(config.hyperparameter_tuning.output_dir)
-            fs_dir = base_dir / "feature_selection"
+            fs_dir = base_dir / config.hyperparameter_tuning.models[0] / "feature_selection"
             run_dir = fs_dir / f"run_{run_idx+1}"
             task_dir = run_dir / f"task_{task_idx+1}"
             task_dir.mkdir(parents=True, exist_ok=True)
             fs_output_dir = task_dir
-        
+            
         if feature_selection_method == 'selectkbest':
             # Get configuration
             k = config.feature_selection.get('k', 10)
@@ -112,12 +112,13 @@ def process_task(task_path, db_info, config, run_seed, run_idx, task_idx):
             verbose_level = 2 if config.settings.verbose > 0 else 0
             
             try:
-                # Apply SelectKBest feature selection
+                # Apply SelectKBest feature selection with run_seed for reproducibility
                 X_train, selector, feature_scores = select_k_best_features(
                     X_train, y_train,
                     k=k,
                     score_func=score_func,
-                    verbose=verbose_level
+                    verbose=verbose_level,
+                    random_state=run_seed  # Pass the run seed for reproducibility
                 )
                 
                 # Transform test set if selection was successful

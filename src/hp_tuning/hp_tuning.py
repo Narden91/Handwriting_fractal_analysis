@@ -69,6 +69,8 @@ def optimize_hyperparameters(model_type, X_train, y_train, n_trials=100, cv=5, m
                 'subsample': trial.suggest_float('subsample', 0.5, 1.0),
                 'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0),
                 'random_state': run_seed,
+                'deterministic': True,  
+                'force_col_wise': True,
                 'verbose': -1,
                 'silent': True
             }
@@ -102,10 +104,18 @@ def optimize_hyperparameters(model_type, X_train, y_train, n_trials=100, cv=5, m
         
         return scores.mean()
     
-    study = optuna.create_study(direction='maximize', sampler=optuna.samplers.TPESampler(seed=run_seed))
+    study = optuna.create_study(
+        direction='maximize', 
+        sampler=optuna.samplers.TPESampler(seed=run_seed),
+    )
     
     with suppress_stdout_stderr():
-        study.optimize(objective_cv, n_trials=n_trials, show_progress_bar=False)
+        study.optimize(
+            objective_cv, 
+            n_trials=n_trials, 
+            show_progress_bar=False,
+            n_jobs=1  # Force single process for full reproducibility
+        )
     
     return study.best_params, study.best_value
 
