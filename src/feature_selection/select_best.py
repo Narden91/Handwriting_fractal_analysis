@@ -13,16 +13,13 @@ from pathlib import Path
 
 console = Console()
 
-# Dictionary of available scoring functions
 SCORING_FUNCTIONS = {
-    # Classification
-    'f_classif': f_classif,  # ANOVA F-value 
-    'chi2': chi2,  # Chi-squared stats (requires non-negative features)
-    'mutual_info_classif': mutual_info_classif,  # Mutual information
+    'f_classif': f_classif,  
+    'chi2': chi2,  
+    'mutual_info_classif': mutual_info_classif,  
     
-    # Regression
-    'f_regression': f_regression,  # F-value
-    'mutual_info_regression': mutual_info_regression  # Mutual information
+    'f_regression': f_regression,  
+    'mutual_info_regression': mutual_info_regression  
 }
 
 def select_k_best_features(X, y, k=10, score_func='f_classif', verbose=0, random_state=None):
@@ -88,7 +85,6 @@ def select_k_best_features(X, y, k=10, score_func='f_classif', verbose=0, random
     # Get scoring function
     if isinstance(score_func, str):
         if score_func in SCORING_FUNCTIONS:
-            # For mutual information methods, we need to wrap them to pass random_state
             if score_func == 'mutual_info_classif':
                 original_func = SCORING_FUNCTIONS[score_func]
                 score_func = lambda X, y: original_func(X, y, random_state=random_state)
@@ -125,11 +121,9 @@ def select_k_best_features(X, y, k=10, score_func='f_classif', verbose=0, random
         func_name = score_func.__name__ if hasattr(score_func, '__name__') else str(score_func)
         console.print(f"[bold cyan]Selecting top {k} features using {func_name}...[/bold cyan]")
     
-    # Apply SelectKBest
     selector = SelectKBest(score_func=score_func, k=k)
     
     try:
-        # Try with original data
         X_new = selector.fit_transform(X, y)
         
         # Convert back to DataFrame with selected feature names
@@ -180,15 +174,11 @@ def plot_feature_scores(feature_scores, output_file=None, figsize=(10, 8), top_n
         The figure object
     """
     plt.figure(figsize=figsize)
-    
-    # Sort by score
     sorted_scores = feature_scores.sort_values('Score', ascending=False).head(top_n)
     
-    # Plot scores
     ax = sns.barplot(x='Score', y='Feature', data=sorted_scores, palette='viridis', 
                     hue='Selected', dodge=False)
     
-    # Highlight selected features
     bars = ax.patches
     for i, bar in enumerate(bars):
         if sorted_scores.iloc[i]['Selected']:
@@ -219,15 +209,10 @@ def save_feature_selection_results(feature_scores, selected_features, output_dir
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Save feature scores CSV
     feature_scores.to_csv(output_dir / "feature_scores.csv", index=False)
-    
-    # Save selected features text file
     with open(output_dir / "selected_features.txt", "w") as f:
         f.write("Selected Features:\n")
         for feature in selected_features:
             f.write(f"- {feature}\n")
-    
-    # Plot feature scores
+
     plot_feature_scores(feature_scores, output_file=output_dir / "feature_scores.png")
