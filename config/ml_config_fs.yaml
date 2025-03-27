@@ -17,7 +17,7 @@ preprocessing:
   scaler: Robust
 
 feature_selection:
-  enabled: False
+  enabled: True
   method: "selectkbest"
   k: 0.4  # Number of features to select (int) or proportion (float between 0 and 1)
   score_func: "mutual_info_classif"  # Scoring function: 'f_classif', 'chi2', 'mutual_info_classif'
@@ -28,4 +28,4 @@ hyperparameter_tuning:
   n_trials: 25 
   cv: 3
   metric: "accuracy"
-  output_dir: "./results"
+  output_dir: "./results_fs_40_mutual"

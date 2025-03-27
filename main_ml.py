@@ -68,9 +68,11 @@ def main(config: DictConfig):
     console.print(f"Found {len(task_files)} task files for processing")
 
     if hasattr(config.hyperparameter_tuning, 'output_dir') and config.hyperparameter_tuning.output_dir:
-        main_output_dir = Path(config.hyperparameter_tuning.output_dir)
+        main_output_dir = Path(config.hyperparameter_tuning.output_dir)        
         main_output_dir.mkdir(parents=True, exist_ok=True)
 
+    # return
+    
     overall_results = {}
 
     for run_idx in range(n_runs):

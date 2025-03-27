@@ -23,7 +23,7 @@ console = Console()
 
 def process_task(task_path, db_info, config, run_seed, run_idx, task_idx):
     """Process a single task with the provided seed."""
-    console.print(f"[bold cyan]Processing Task {task_idx+1}: {task_path.name} (Run {run_idx+1}, Seed {run_seed})[/bold cyan]")
+    console.print(f"[bold cyan]Processing Task {task_idx+1}: {task_path.name} (Run {run_idx+1}, Seed {run_seed})[/bold cyan]") if config.settings.verbose > 0 else None
 
     # Load task data
     task_df = pd.read_csv(task_path)
@@ -74,7 +74,7 @@ def process_task(task_path, db_info, config, run_seed, run_idx, task_idx):
 
     # --- FEATURE SELECTION ---
     if hasattr(config, 'feature_selection') and config.feature_selection.enabled:
-        console.print("[bold]Starting feature selection...[/bold]")
+        console.print("[bold]Starting feature selection...[/bold]") if config.settings.verbose > 0 else None
 
         feature_selection_method = config.feature_selection.get('method', 'selectkbest')
 
@@ -128,7 +128,7 @@ def process_task(task_path, db_info, config, run_seed, run_idx, task_idx):
             console.print(f"[yellow]Unknown feature selection method: {feature_selection_method}. Skipping feature selection.[/yellow]")
 
     # --- MODEL TRAINING WITH HYPERPARAMETER OPTIMIZATION ---
-    console.print("[bold]Starting hyperparameter optimization...[/bold]")
+    console.print("[bold]Starting hyperparameter optimization...[/bold]") if config.settings.verbose > 0 else None
 
     # Format: results/model_type/run_N/task_M/
     task_output_dirs = {}
@@ -164,6 +164,6 @@ def process_task(task_path, db_info, config, run_seed, run_idx, task_idx):
     best_model_type = max(results, key=lambda k: results[k]['test_accuracy'])
     best_model_accuracy = results[best_model_type]['test_accuracy']
 
-    console.print(f"[bold green]Best model for Task {task_idx+1} (Run {run_idx+1}): {best_model_type} with accuracy {best_model_accuracy:.4f}[/bold green]")
+    console.print(f"[bold green]Best model for Task {task_idx+1} (Run {run_idx+1}): {best_model_type} with accuracy {best_model_accuracy:.4f}[/bold green]") if config.settings.verbose > 0 else None
 
     return results
