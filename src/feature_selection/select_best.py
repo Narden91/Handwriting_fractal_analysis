@@ -124,30 +124,17 @@ def select_k_best_features(X, y, k=10, score_func='f_classif', verbose=0, random
     selector = SelectKBest(score_func=score_func, k=k)
     
     try:
-        # Store original column names
-        original_columns = X.columns.tolist()
-        
-        # Fit and transform
         X_new = selector.fit_transform(X, y)
         
-        # Get masks for selected features
+        # Convert back to DataFrame with selected feature names
         support = selector.get_support()
+        selected_features = X.columns[support].tolist()
         
-        # Get names of selected features
-        selected_features = [original_columns[i] for i in range(len(original_columns)) if support[i]]
-        
-        # Safety check - make sure we have the right number of features
-        if len(selected_features) != X_new.shape[1]:
-            console.print(f"[red]Warning: Feature count mismatch! Selected {len(selected_features)} names but have {X_new.shape[1]} features.[/red]")
-            # Fallback - use numeric indices instead
-            selected_features = [f"feature_{i}" for i in range(X_new.shape[1])]
-        
-        # Create new DataFrame with selected features
         X_new_df = pd.DataFrame(X_new, columns=selected_features, index=X.index)
         
-        # Create feature scores DataFrame
+        # Get feature scores
         feature_scores = pd.DataFrame({
-            'Feature': original_columns,
+            'Feature': X.columns,
             'Score': selector.scores_,
             'Selected': support
         }).sort_values('Score', ascending=False)
@@ -165,81 +152,6 @@ def select_k_best_features(X, y, k=10, score_func='f_classif', verbose=0, random
         # Return original data if selection fails
         console.print("[yellow]Feature selection failed. Returning original data.[/yellow]")
         return X, None, pd.DataFrame({'Feature': X.columns, 'Score': np.ones(X.shape[1]), 'Selected': True})
-
-
-def safe_apply_feature_selection(selector, X_train, X_test, verbose=0):
-    """
-    Safely apply a fitted feature selector to both training and test data.
-    
-    Parameters
-    ----------
-    selector : sklearn feature selector
-        Fitted feature selector
-    X_train : pandas DataFrame
-        Training features that the selector was fitted on
-    X_test : pandas DataFrame
-        Test features to apply the selection to
-    verbose : int
-        Verbosity level
-    
-    Returns
-    -------
-    X_train_selected, X_test_selected : pandas DataFrames
-        DataFrames with only the selected features
-    """
-    try:
-        # Get the support mask from the selector
-        if not hasattr(selector, 'get_support'):
-            if verbose > 0:
-                console.print("[red]Error: Selector does not have get_support method[/red]")
-            return X_train, X_test
-            
-        support = selector.get_support()
-        
-        # Ensure the support length matches X_train columns
-        if len(support) != len(X_train.columns):
-            if verbose > 0:
-                console.print(f"[red]Error: Support mask length ({len(support)}) doesn't match X_train columns ({len(X_train.columns)})[/red]")
-            return X_train, X_test
-            
-        # Get the selected feature names
-        selected_features = X_train.columns[support].tolist()
-        
-        if verbose > 0:
-            console.print(f"[green]Selected {len(selected_features)} features[/green]")
-            if verbose > 1:
-                console.print(f"Features: {selected_features}")
-        
-        # Ensure all selected features exist in both datasets
-        missing_in_train = [f for f in selected_features if f not in X_train.columns]
-        missing_in_test = [f for f in selected_features if f not in X_test.columns]
-        
-        if missing_in_train or missing_in_test:
-            if verbose > 0:
-                if missing_in_train:
-                    console.print(f"[yellow]Warning: {len(missing_in_train)} selected features missing in train[/yellow]")
-                if missing_in_test:
-                    console.print(f"[yellow]Warning: {len(missing_in_test)} selected features missing in test[/yellow]")
-            
-            # Get only common features
-            common_features = [f for f in selected_features if f in X_train.columns and f in X_test.columns]
-            
-            if verbose > 0:
-                console.print(f"[yellow]Proceeding with {len(common_features)} common features[/yellow]")
-            
-            selected_features = common_features
-        
-        # Apply the selection
-        X_train_selected = X_train[selected_features].copy()
-        X_test_selected = X_test[selected_features].copy()
-        
-        return X_train_selected, X_test_selected
-        
-    except Exception as e:
-        if verbose > 0:
-            console.print(f"[red]Error applying feature selection: {str(e)}[/red]")
-        return X_train, X_test
-
 
 def plot_feature_scores(feature_scores, output_file=None, figsize=(10, 8), top_n=20):
     """

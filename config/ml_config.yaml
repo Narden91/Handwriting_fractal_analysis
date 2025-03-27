@@ -25,7 +25,7 @@ feature_selection:
 
 hyperparameter_tuning:
   models: ["mlp", "xgbrf", "lgbm", "svc"]  # "mlp", "rf", "lgbm", "xgbrf", "dt", "svc" 
-  n_trials: 25 
+  n_trials: 50 
   cv: 3
   metric: "accuracy"
   output_dir: "./results"
