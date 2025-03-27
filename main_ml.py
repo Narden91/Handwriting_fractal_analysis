@@ -26,7 +26,7 @@ def set_global_seeds(seed):
     os.environ['PYTHONHASHSEED'] = str(seed)
 
 
-@hydra.main(config_path="./config", config_name="ml_config", version_base="1.2")
+@hydra.main(config_path="./config", config_name="ml_config_fs", version_base="1.2")
 def main(config: DictConfig):
     """Main function to run the ML pipeline."""
     start_time = time.time()

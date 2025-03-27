@@ -7,10 +7,10 @@ data:
   feat_folder: Feature_fractal
 
 settings:
-  verbose: 0
-  debug: False
+  verbose: 1
+  debug: True
   base_seed: 42
-  n_runs: 20
+  n_runs: 1
   full_reproducibility: True
 
 preprocessing:
@@ -24,8 +24,8 @@ feature_selection:
   save_plots: True
 
 hyperparameter_tuning:
-  models: ["mlp", "xgbrf", "lgbm", "svc"]  # "mlp", "rf", "lgbm", "xgbrf", "dt", "svc" 
-  n_trials: 25 
+  models: ["svc"]  # "mlp", "rf", "lgbm", "xgbrf", "dt", "svc" 
+  n_trials: 2 
   cv: 3
   metric: "accuracy"
   output_dir: "./results_fs_40_mutual"
