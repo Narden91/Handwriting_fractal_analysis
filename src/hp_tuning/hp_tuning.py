@@ -202,7 +202,7 @@ def evaluate_model(model_type, best_params, X_train, y_train, X_test, y_test, ou
         run_seed: Random seed for reproducibility
 
     Returns:
-        results: Dictionary with evaluation metrics and feature importances
+        results: Dictionary with evaluation metrics, feature importances, and the trained model
     """
     # Check for NaNs in both train and test sets
     has_nan_train = check_for_nan(X_train, "training set")
@@ -410,7 +410,8 @@ def evaluate_model(model_type, best_params, X_train, y_train, X_test, y_test, ou
         'specificity': specificity,
         'mcc': mcc,
         'f1_score': f1,
-        'feature_importances': feature_importances
+        'feature_importances': feature_importances,
+        'model': model_to_use  # Add the trained model to the results
     }
 
     return results
@@ -453,7 +454,8 @@ def run_hyperparameter_search(models_to_optimize, X_train, y_train, X_test, y_te
             'best_params': best_params,
             'best_cv_score': best_cv_score,
             'test_accuracy': eval_results['accuracy'],
-            'feature_importances': eval_results['feature_importances']
+            'feature_importances': eval_results['feature_importances'],
+            'model': eval_results['model']  # Save the trained model
         }
 
     return results

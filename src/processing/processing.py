@@ -39,6 +39,9 @@ def process_task(task_path, db_info, config, run_seed, run_idx, task_idx):
         task_df.drop("Class", axis=1), task_df["Class"],
         test_size=0.2, random_state=run_seed, stratify=task_df["Class"])
 
+    # Save test set IDs before dropping (for majority vote later)
+    test_ids = X_test["Id"].copy()
+
     X_train = X_train.drop("Id", axis=1)
     X_test = X_test.drop("Id", axis=1)
 
@@ -165,5 +168,33 @@ def process_task(task_path, db_info, config, run_seed, run_idx, task_idx):
     best_model_accuracy = results[best_model_type]['test_accuracy']
 
     console.print(f"[bold green]Best model for Task {task_idx+1} (Run {run_idx+1}): {best_model_type} with accuracy {best_model_accuracy:.4f}[/bold green]") if config.settings.verbose > 0 else None
+
+    # --- SAVE TEST SET IDS AND PREDICTIONS ---
+    # This is a new section to support majority voting
+    for model_type in models_to_optimize:
+        if model_type in results and 'model' in results[model_type]:
+            try:
+                # Get the trained model
+                model = results[model_type]['model']
+                
+                # Make predictions
+                y_pred = model.predict(X_test)
+                
+                # Create DataFrame with IDs and predictions
+                pred_df = pd.DataFrame({
+                    'Id': test_ids.values,
+                    'TrueLabel': y_test.values,
+                    'Prediction': y_pred
+                })
+                
+                # Save predictions
+                if model_type in task_output_dirs:
+                    output_dir = task_output_dirs[model_type]
+                    pred_df.to_csv(output_dir / "predictions.csv", index=False)
+                    
+                    if config.settings.verbose > 0:
+                        console.print(f"[dim]Saved predictions for {model_type} to {output_dir / 'predictions.csv'}[/dim]")
+            except Exception as e:
+                console.print(f"[yellow]Error saving predictions for {model_type}: {str(e)}[/yellow]")
 
     return results
