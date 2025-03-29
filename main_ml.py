@@ -8,6 +8,7 @@ from pathlib import Path
 import time
 import json
 import os
+import re
 
 sys.dont_write_bytecode = True
 from rich import print
@@ -17,6 +18,19 @@ from src.processing.processing import process_task
 
 
 console = Console()
+
+
+def natural_sort_key(path):
+    """
+    Sort key function that extracts the task number from the filename
+    for proper numerical sorting.
+    """
+    # Extract the task number from the filename (e.g., "TASK_01" -> 1)
+    match = re.search(r'TASK_(\d+)', path.name)
+    if match:
+        return int(match.group(1))
+    # Fallback to standard sorting if pattern doesn't match
+    return path.name
 
 
 def set_global_seeds(seed):
@@ -65,6 +79,9 @@ def main(config: DictConfig):
 
     # Load all task files (files that start with 'TASK_')
     task_files = [f for f in features_path.glob("TASK_*.csv")]
+    # Sort task files numerically using the natural sort key
+    task_files.sort(key=natural_sort_key)
+    
     console.print(f"Found {len(task_files)} task files for processing")
 
     if hasattr(config.hyperparameter_tuning, 'output_dir') and config.hyperparameter_tuning.output_dir:

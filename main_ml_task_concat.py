@@ -14,6 +14,7 @@ import json
 import os
 import matplotlib.pyplot as plt
 import seaborn as sns
+import re
 
 sys.dont_write_bytecode = True
 from rich import print
@@ -25,6 +26,19 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, RobustScaler
 
 console = Console()
+
+
+def natural_sort_key(path):
+    """
+    Sort key function that extracts the task number from the filename
+    for proper numerical sorting.
+    """
+    # Extract the task number from the filename (e.g., "TASK_01" -> 1)
+    match = re.search(r'TASK_(\d+)', path.name)
+    if match:
+        return int(match.group(1))
+    # Fallback to standard sorting if pattern doesn't match
+    return path.name
 
 
 def set_global_seeds(seed):
@@ -47,6 +61,8 @@ def concatenate_task_features(data_path, verbose=0):
         DataFrame with concatenated features, with ID as first column and Class as last column
     """
     task_files = sorted([f for f in data_path.glob("TASK_*.csv")])
+    task_files.sort(key=natural_sort_key)
+    
     if verbose > 0:
         console.print(f"Found {len(task_files)} task files for concatenation")
     

@@ -10,7 +10,7 @@ settings:
   verbose: 0
   debug: False
   base_seed: 42
-  n_runs: 1
+  n_runs: 20
   full_reproducibility: True
 
 preprocessing:
@@ -21,11 +21,11 @@ feature_selection:
   method: "selectkbest"
   k: 0.4  # Number of features to select (int) or proportion (float between 0 and 1)
   score_func: "mutual_info_classif"  # Scoring function: 'f_classif', 'chi2', 'mutual_info_classif'
-  save_plots: True
+  save_plots: False
 
 hyperparameter_tuning:
-  models: ["svc"]  # "mlp", "rf", "lgbm", "xgbrf", "dt", "svc" #"mlp", "xgbrf", "lgbm", 
-  n_trials: 5 
+  models: ["mlp", "xgbrf", "lgbm", "svc"]  # "mlp", "rf", "lgbm", "xgbrf", "dt", "svc" #"mlp", "xgbrf", "lgbm", 
+  n_trials: 50 
   cv: 3
   metric: "accuracy"
-  output_dir: "./results"
+  output_dir: "./results_wo_fs_mv"

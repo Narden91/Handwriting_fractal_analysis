@@ -9,10 +9,10 @@ data:
   class_column: Class  # Column name for class labels
 
 settings:
-  verbose: 1
+  verbose: 0
   debug: False
   base_seed: 42
-  n_runs: 1
+  n_runs: 20
   full_reproducibility: True
 
 preprocessing:
@@ -27,8 +27,8 @@ feature_selection:
   exclude_task_columns: True  # Set to True to exclude task columns from feature selection
 
 hyperparameter_tuning:
-  models: ["svc"]  # "mlp", "xgbrf", "lgbm", "xgbrf", "dt", "svc" 
-  n_trials: 20 
+  models: ["mlp", "xgbrf", "lgbm", "svc"]  # "mlp", "xgbrf", "lgbm", "xgbrf", "dt", "svc" 
+  n_trials: 50 
   cv: 3
   metric: "accuracy"
   output_dir: "./results_cross_task"

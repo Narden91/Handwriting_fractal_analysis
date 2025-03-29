@@ -28,4 +28,4 @@ hyperparameter_tuning:
   n_trials: 50 
   cv: 3
   metric: "accuracy"
-  output_dir: "./results_fs_40_mutual"
+  output_dir: "./results_fs_40_mutual_mv"
