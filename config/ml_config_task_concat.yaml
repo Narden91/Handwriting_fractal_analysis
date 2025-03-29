@@ -1,0 +1,31 @@
+defaults:
+  - _self_
+
+data:
+  path: data/
+  db_info: Subject_db_personal_features.csv
+  feat_folder: Feature_fractal
+
+settings:
+  verbose: 1
+  debug: False
+  base_seed: 42
+  n_runs: 1
+  full_reproducibility: True
+
+preprocessing:
+  scaler: Robust
+
+feature_selection:
+  enabled: True
+  method: "selectkbest"
+  k: 0.017  # Number of features to select (int) or proportion (float between 0 and 1)
+  score_func: "mutual_info_classif"  # Scoring function: 'f_classif', 'chi2', 'mutual_info_classif'
+  save_plots: True
+
+hyperparameter_tuning:
+  models: ["svc"]  # "mlp", "rf", "lgbm", "xgbrf", "dt", "svc" 
+  n_trials: 2
+  cv: 3
+  metric: "accuracy"
+  output_dir: "./results_task_concat"

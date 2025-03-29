@@ -117,36 +117,33 @@ def cross_task_analysis(data_df, id_column, task_column, class_column, config, r
     scaler = StandardScaler() if config.preprocessing.scaler == "Standard" else RobustScaler()
     
     # Extract binary features if they exist (don't scale these)
-    binary_columns = []
+    binary_columns = list(task_dummies_train.columns)  # Start with task columns
     if all(col in X_train.columns for col in ["Work", "Sex"]):
-        binary_columns = ["Work", "Sex"]
-        X_train_no_scale = X_train[binary_columns]
-        X_test_no_scale = X_test[binary_columns]
-        
-        X_train_to_scale = X_train.drop(binary_columns, axis=1)
-        X_test_to_scale = X_test.drop(binary_columns, axis=1)
-        
-        # Scale the non-binary features
-        scaled_columns = X_train_to_scale.columns
-        X_train_scaled = pd.DataFrame(scaler.fit_transform(X_train_to_scale),
-                                    columns=scaled_columns,
-                                    index=X_train_to_scale.index)
-        X_test_scaled = pd.DataFrame(scaler.transform(X_test_to_scale),
-                                    columns=scaled_columns,
-                                    index=X_test_to_scale.index)
-        
-        X_train = pd.concat([X_train_scaled.reset_index(drop=True),
-                            X_train_no_scale.reset_index(drop=True)], axis=1)
-        X_test = pd.concat([X_test_scaled.reset_index(drop=True),
-                            X_test_no_scale.reset_index(drop=True)], axis=1)
-    else:
-        # Scale all features
-        X_train = pd.DataFrame(scaler.fit_transform(X_train),
-                            columns=X_train.columns,
-                            index=X_train.index)
-        X_test = pd.DataFrame(scaler.transform(X_test),
-                            columns=X_test.columns,
-                            index=X_test.index)
+        binary_columns.extend(["Work", "Sex"])
+    
+    X_train_no_scale = X_train[binary_columns]
+    X_test_no_scale = X_test[binary_columns]
+    
+    X_train_to_scale = X_train.drop(binary_columns, axis=1)
+    X_test_to_scale = X_test.drop(binary_columns, axis=1)
+    
+    # Scale the non-binary features
+    scaled_columns = X_train_to_scale.columns
+    X_train_scaled = pd.DataFrame(scaler.fit_transform(X_train_to_scale),
+                                columns=scaled_columns,
+                                index=X_train_to_scale.index)
+    X_test_scaled = pd.DataFrame(scaler.transform(X_test_to_scale),
+                                columns=scaled_columns,
+                                index=X_test_to_scale.index)
+    
+    X_train = pd.concat([X_train_scaled.reset_index(drop=True),
+                        X_train_no_scale.reset_index(drop=True)], axis=1)
+    X_test = pd.concat([X_test_scaled.reset_index(drop=True),
+                        X_test_no_scale.reset_index(drop=True)], axis=1)
+    
+    # Since the original CSV has no NaN values, we don't need to check or impute
+    # This simplifies the pipeline
+    use_imputer = False
     
     # Feature selection if enabled
     if hasattr(config, 'feature_selection') and config.feature_selection.enabled:
@@ -166,31 +163,66 @@ def cross_task_analysis(data_df, id_column, task_column, class_column, config, r
             k = config.feature_selection.get('k', 10)
             score_func = config.feature_selection.get('score_func', 'f_classif')
             verbose_level = 2 if config.settings.verbose > 0 else 0
+            exclude_task = config.feature_selection.get('exclude_task_columns', False)
             
             try:
-                X_train, selector, feature_scores = select_k_best_features(
-                    X_train, y_train,
-                    k=k,
-                    score_func=score_func,
-                    verbose=verbose_level,
-                    random_state=run_seed  
-                )
-                
-                if selector:
+                if exclude_task:
+                    # Identify task columns
+                    task_columns = [col for col in X_train.columns if col.startswith('task_')]
+                    
+                    # Create a copy without task columns for feature selection only
+                    X_train_for_fs = X_train.drop(columns=task_columns)
+                    
+                    console.print("[bold blue]Performing feature selection WITHOUT task columns[/bold blue]")
+                    
+                    # Run feature selection on handwriting features only
+                    X_train_selected, selector, feature_scores = select_k_best_features(
+                        X_train_for_fs, y_train, k=k, score_func=score_func, 
+                        verbose=verbose_level, random_state=run_seed)
+                    
+                    # Get the columns that were selected
+                    selected_features = X_train_selected.columns.tolist()
+                    
+                    # Apply selection to test set
+                    X_test_selected = X_test[selected_features]
+                    
+                    # Add back the task columns after feature selection
+                    X_train = pd.concat([X_train_selected, X_train[task_columns]], axis=1)
+                    X_test = pd.concat([X_test_selected, X_test[task_columns]], axis=1)
+                    
+                    # Update feature scores to include task columns (marked as "not evaluated")
+                    for task_col in task_columns:
+                        feature_scores = pd.concat([
+                            feature_scores,
+                            pd.DataFrame({
+                                'Feature': [task_col],
+                                'Score': [float('nan')],
+                                'Selected': [True]  # We're keeping them all
+                            })
+                        ], ignore_index=True)
+                    
+                    console.print(f"[green]Selected {len(selected_features)} handwriting features + {len(task_columns)} task columns[/green]")
+                else:
+                    # Run feature selection on all features including task columns
+                    console.print("[bold blue]Performing feature selection on ALL features including task columns[/bold blue]")
+                    X_train, selector, feature_scores = select_k_best_features(
+                        X_train, y_train, k=k, score_func=score_func, 
+                        verbose=verbose_level, random_state=run_seed)
+                    
                     selected_features = X_train.columns.tolist()
                     X_test = X_test[selected_features]
                     
-                    if fs_output_dir is not None and config.feature_selection.get('save_plots', True):
-                        save_feature_selection_results(
-                            feature_scores,
-                            selected_features,
-                            fs_output_dir
-                        )
-                    
-                    console.print(f"[bold green]Feature selection completed. Selected {len(selected_features)} features.[/bold green]")
-                else:
-                    console.print("[yellow]Feature selection returned all features.[/yellow]")
-                    
+                    # Count selected task columns
+                    task_cols_selected = sum(1 for col in selected_features if col.startswith('task_'))
+                    console.print(f"[green]Selected {len(selected_features)} features ({task_cols_selected} task columns)[/green]")
+                
+                if fs_output_dir is not None and config.feature_selection.get('save_plots', True):
+                    save_feature_selection_results(
+                        feature_scores,
+                        selected_features,
+                        fs_output_dir
+                    )
+                
             except Exception as e:
                 console.print(f"[bold red]Error during feature selection: {str(e)}[/bold red]")
                 console.print("[yellow]Continuing with all features...[/yellow]")
@@ -221,6 +253,15 @@ def cross_task_analysis(data_df, id_column, task_column, class_column, config, r
     n_trials = config.hyperparameter_tuning.n_trials
     metric = config.hyperparameter_tuning.metric
     cv = config.hyperparameter_tuning.cv
+    
+    # Convert task columns to float type to avoid isnan() compatibility issues
+    task_columns = [col for col in X_train.columns if col.startswith('task_')]
+    for col in task_columns:
+        X_train[col] = X_train[col].astype(float)
+        X_test[col] = X_test[col].astype(float)
+    
+    if config.settings.verbose > 0:
+        console.print(f"[dim]Converted {len(task_columns)} task columns to float type to ensure compatibility[/dim]")
     
     # Run hyperparameter optimization with train/test data
     results = run_hyperparameter_search(
@@ -255,7 +296,14 @@ def main(config: DictConfig):
         fs_method = config.feature_selection.method
         k_value = config.feature_selection.k
         score_func = config.feature_selection.get('score_func', 'f_classif')
-        console.print(Panel(f"[bold magenta]Feature Selection: {fs_method.upper()} (k={k_value}, scoring={score_func})[/bold magenta]",
+        exclude_task = config.feature_selection.get('exclude_task_columns', False)
+        fs_description = f"{fs_method.upper()} (k={k_value}, scoring={score_func}"
+        if exclude_task:
+            fs_description += ", excluding task columns)"
+        else:
+            fs_description += ", including task columns)"
+        
+        console.print(Panel(f"[bold magenta]Feature Selection: {fs_description}[/bold magenta]",
                           expand=False))
     
     verbose = config.settings.verbose
@@ -356,6 +404,7 @@ def main(config: DictConfig):
                             metrics['FeatureSelectionMethod'] = config.feature_selection.method
                             metrics['K'] = config.feature_selection.k
                             metrics['ScoreFunc'] = config.feature_selection.get('score_func', 'f_classif')
+                            metrics['ExcludeTaskColumns'] = config.feature_selection.get('exclude_task_columns', False)
                         
                         model_metrics[model_type].append(metrics)
         
@@ -388,6 +437,19 @@ def main(config: DictConfig):
                 
                 if hasattr(config, 'feature_selection') and config.feature_selection.enabled:
                     df.to_csv(model_dir / "complete_metrics.csv", index=False)
+                    
+        # Create comparison summary if we have both task-aware and task-independent runs
+        if hasattr(config, 'feature_selection') and config.feature_selection.enabled and 'ExcludeTaskColumns' in df.columns:
+            # Create aggregate comparison of the two approaches
+            for model_type, metrics_list in model_metrics.items():
+                if len(metrics_list) > 0:
+                    comparison_df = pd.DataFrame(metrics_list)
+                    if 'ExcludeTaskColumns' in comparison_df.columns and comparison_df['ExcludeTaskColumns'].nunique() > 1:
+                        # We have both approaches, create comparison
+                        comparison_summary = comparison_df.groupby('ExcludeTaskColumns')[available_metrics].agg(['mean', 'std']).reset_index()
+                        comparison_summary.columns = ['_'.join(col).strip('_') for col in comparison_summary.columns.values]
+                        comparison_summary.to_csv(model_dir / "task_aware_vs_independent_comparison.csv", index=False)
+                        console.print(f"[bold green]Created comparison of task-aware vs. task-independent feature selection for {model_type}[/bold green]")
     
     end_time = time.time()
     execution_time = end_time - start_time

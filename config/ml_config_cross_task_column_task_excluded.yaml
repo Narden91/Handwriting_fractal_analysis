@@ -24,11 +24,11 @@ feature_selection:
   k: 0.4  # Number of features to select (int) or proportion (float between 0 and 1)
   score_func: "mutual_info_classif"  # Scoring function: 'f_classif', 'chi2', 'mutual_info_classif'
   save_plots: True
-  exclude_task_columns: False  # Set to True to exclude task columns from feature selection
+  exclude_task_columns: True  # Set to True to exclude task columns from feature selection
 
 hyperparameter_tuning:
   models: ["svc"]  # "mlp", "xgbrf", "lgbm", "xgbrf", "dt", "svc" 
   n_trials: 20 
   cv: 3
   metric: "accuracy"
-  output_dir: "./results_cross_task_to_task_columns"
+  output_dir: "./results_cross_task"
