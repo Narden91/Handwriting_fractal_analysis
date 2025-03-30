@@ -43,12 +43,129 @@ def set_global_seeds(seed):
     os.environ['PYTHONHASHSEED'] = str(seed)
 
 
+def check_task_completed(base_dir, model_types, run_idx, task_idx):
+    """
+    Check if all models for a specific task in a run have completed processing.
+    
+    Parameters:
+    -----------
+    base_dir : Path
+        Base output directory
+    model_types : list
+        List of model types to check
+    run_idx : int
+        Run index (0-based)
+    task_idx : int
+        Task index (0-based)
+        
+    Returns:
+    --------
+    bool
+        True if all models have completed this task, False otherwise
+    """
+    for model_type in model_types:
+        model_dir = base_dir / model_type / f"run_{run_idx+1}" / f"task_{task_idx+1}"
+        
+        # Check for metrics file and predictions file
+        metrics_file = model_dir / "metrics.json"
+        pred_file = model_dir / "predictions.csv"
+        
+        if not metrics_file.exists() or not pred_file.exists():
+            return False
+    
+    return True
+
+
+def load_task_results(base_dir, model_types, run_idx, task_idx):
+    """
+    Load results for a completed task from existing files.
+    
+    Parameters:
+    -----------
+    base_dir : Path
+        Base output directory
+    model_types : list
+        List of model types
+    run_idx : int
+        Run index (0-based)
+    task_idx : int
+        Task index (0-based)
+        
+    Returns:
+    --------
+    dict
+        Dictionary with task results for all models
+    """
+    task_results = {}
+    
+    for model_type in model_types:
+        metrics_file = base_dir / model_type / f"run_{run_idx+1}" / f"task_{task_idx+1}" / "metrics.json"
+        
+        try:
+            # Load metrics from the file
+            with open(metrics_file, 'r') as f:
+                metrics = json.load(f)
+            
+            # Construct a minimal task result object that contains the necessary information
+            # for downstream processing (especially majority vote)
+            task_results[model_type] = {
+                'test_accuracy': metrics.get('accuracy', 0),
+                'best_params': {},  # Not needed for majority vote
+                'best_cv_score': 0,  # Not needed for majority vote
+                'feature_importances': None  # Not needed for majority vote
+            }
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not load metrics for {model_type} (Run {run_idx+1}, Task {task_idx+1}): {e}[/yellow]")
+            # Return an empty dict if any model fails to load, to trigger reprocessing
+            return {}
+    
+    return task_results
+
+
+def check_run_completed(base_dir, model_types, run_idx, task_files, debug=False):
+    """
+    Check if an entire run has already been completed.
+    
+    Parameters:
+    -----------
+    base_dir : Path
+        Base output directory
+    model_types : list
+        List of model types
+    run_idx : int
+        Run index (0-based)
+    task_files : list
+        List of task files
+    debug : bool
+        Whether debug mode is enabled
+        
+    Returns:
+    --------
+    bool
+        True if the entire run is completed, False otherwise
+    """
+    for task_idx, _ in enumerate(task_files):
+        if not check_task_completed(base_dir, model_types, run_idx, task_idx):
+            return False
+        
+        # In debug mode, only check the first task
+        if debug and task_idx == 0:
+            break
+    
+    return True
+
+
 @hydra.main(config_path="./config", config_name="ml_config", version_base="1.2")
 def main(config: DictConfig):
     """Main function to run the ML pipeline."""
     start_time = time.time()
     console.print(Panel("[bold cyan]🔍 ML Fractal Handwriting Analysis[/bold cyan]",
                       title="Starting Analysis", expand=False))
+
+    # Check if force_reprocess flag is set in config
+    force_reprocess = config.settings.get('force_reprocess', False)
+    if force_reprocess:
+        console.print("[bold yellow]Force reprocess flag is set. Will reprocess all tasks even if results exist.[/bold yellow]")
 
     if hasattr(config, 'feature_selection') and config.feature_selection.enabled:
         fs_method = config.feature_selection.method
@@ -85,35 +202,72 @@ def main(config: DictConfig):
     task_files.sort(key=natural_sort_key)
     console.print(f"Found {len(task_files)} task files for processing")
 
+    # Initialize output directory
     if hasattr(config.hyperparameter_tuning, 'output_dir') and config.hyperparameter_tuning.output_dir:
         main_output_dir = Path(config.hyperparameter_tuning.output_dir)        
         main_output_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        main_output_dir = None
     
     overall_results = {}
 
+    # Process each run
     for run_idx in range(n_runs):
         run_seed = base_seed + run_idx
         console.print(Panel(f"[bold]Starting Run {run_idx+1}/{n_runs} with Seed {run_seed}[/bold]",
                           expand=False))
 
         run_results = {}
-
-        # Process each task
-        for task_idx, task in enumerate(task_files):
-            task_results = process_task(
-                task, db_info, config, run_seed, run_idx, task_idx)
-
-            task_name = task_idx + 1
-            run_results[task_name] = task_results
-
-            if debug and task_idx == 0:
-                console.print("[bold yellow]Debug mode: stopping after first task[/bold yellow]")
-                break
-
+        
+        # Check if the entire run has been completed already
+        if (not force_reprocess and 
+            main_output_dir is not None and 
+            check_run_completed(main_output_dir, config.hyperparameter_tuning.models, run_idx, task_files, debug)):
+            
+            console.print(f"[bold green]Run {run_idx+1} has already been fully processed. Loading results...[/bold green]")
+            
+            # Load results for all tasks in this run
+            for task_idx, _ in enumerate(task_files):
+                task_name = task_idx + 1
+                task_results = load_task_results(main_output_dir, config.hyperparameter_tuning.models, run_idx, task_idx)
+                run_results[task_name] = task_results
+                
+                # In debug mode, only process the first task
+                if debug and task_idx == 0:
+                    break
+        else:
+            # Process each task in this run
+            for task_idx, task in enumerate(task_files):
+                # Check if this individual task has already been completed
+                if (not force_reprocess and 
+                    main_output_dir is not None and 
+                    check_task_completed(main_output_dir, config.hyperparameter_tuning.models, run_idx, task_idx)):
+                    
+                    console.print(f"[bold yellow]Task {task_idx+1} in Run {run_idx+1} has already been processed. Loading results...[/bold yellow]")
+                    
+                    # Load results for this task
+                    task_name = task_idx + 1
+                    task_results = load_task_results(main_output_dir, config.hyperparameter_tuning.models, run_idx, task_idx)
+                    run_results[task_name] = task_results
+                else:
+                    # Process the task normally
+                    console.print(f"[bold blue]Processing Task {task_idx+1} in Run {run_idx+1}...[/bold blue]")
+                    task_results = process_task(
+                        task, db_info, config, run_seed, run_idx, task_idx)
+                    
+                    task_name = task_idx + 1
+                    run_results[task_name] = task_results
+                
+                # In debug mode, only process the first task
+                if debug and task_idx == 0:
+                    console.print("[bold yellow]Debug mode: stopping after first task[/bold yellow]")
+                    break
+        
+        # Store results for this run
         overall_results[f"run_{run_idx+1}"] = run_results
 
     # Run majority vote analysis if output_dir is specified
-    if hasattr(config.hyperparameter_tuning, 'output_dir') and config.hyperparameter_tuning.output_dir:
+    if main_output_dir is not None:
         console.print(Panel("[bold cyan]🔍 Running Majority Vote Analysis[/bold cyan]",
                         title="Starting Majority Vote Analysis", expand=False))
         
@@ -128,7 +282,7 @@ def main(config: DictConfig):
             if run_key in overall_results:
                 overall_results[run_key]['majority_vote'] = run_results
 
-    if hasattr(config.hyperparameter_tuning, 'output_dir') and config.hyperparameter_tuning.output_dir:
+    if main_output_dir is not None:
         model_metrics = {}
 
         for model_type in config.hyperparameter_tuning.models:
@@ -136,7 +290,7 @@ def main(config: DictConfig):
 
         # Loop through all the tasks and runs to collect metrics
         for run_idx in range(n_runs):
-            run_seed = base_seed + run_idx * 100
+            run_seed = base_seed + run_idx
 
             for task_idx, task in enumerate(task_files):
                 task_name = task_idx + 1
@@ -150,19 +304,22 @@ def main(config: DictConfig):
                     metrics_file = model_dir / f"run_{run_idx+1}" / f"task_{task_idx+1}" / "metrics.json"
 
                     if metrics_file.exists():
-                        with open(metrics_file, 'r') as f:
-                            metrics = json.load(f)
+                        try:
+                            with open(metrics_file, 'r') as f:
+                                metrics = json.load(f)
 
-                        metrics['Run'] = run_idx + 1
-                        metrics['Seed'] = run_seed
-                        metrics['Task'] = task_name
+                            metrics['Run'] = run_idx + 1
+                            metrics['Seed'] = run_seed
+                            metrics['Task'] = task_name
 
-                        if hasattr(config, 'feature_selection') and config.feature_selection.enabled:
-                            metrics['FeatureSelectionMethod'] = config.feature_selection.method
-                            metrics['K'] = config.feature_selection.k
-                            metrics['ScoreFunc'] = config.feature_selection.get('score_func', 'f_classif')
+                            if hasattr(config, 'feature_selection') and config.feature_selection.enabled:
+                                metrics['FeatureSelectionMethod'] = config.feature_selection.method
+                                metrics['K'] = config.feature_selection.k
+                                metrics['ScoreFunc'] = config.feature_selection.get('score_func', 'f_classif')
 
-                        model_metrics[model_type].append(metrics)
+                            model_metrics[model_type].append(metrics)
+                        except Exception as e:
+                            console.print(f"[yellow]Error reading metrics for {model_type} (Run {run_idx+1}, Task {task_idx+1}): {e}[/yellow]")
 
         # Create performance summary CSV for each model
         for model_type, metrics_list in model_metrics.items():

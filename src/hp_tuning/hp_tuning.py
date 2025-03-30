@@ -19,7 +19,9 @@ from pathlib import Path
 import os
 import sys
 from contextlib import contextmanager
+from optuna.pruners import MedianPruner
 import json
+
 
 # Setup loggers
 logger = logging.getLogger(__name__)
@@ -61,6 +63,10 @@ def optimize_hyperparameters(model_type, X_train, y_train, n_trials=100, cv=5, m
     has_nan = check_for_nan(X_train, "training set")
 
     def objective_cv(trial):
+        import time
+        start_time = time.time()
+        max_trial_time = 30 
+        
         if model_type == 'rf':
             model_cls = RandomForestClassifier
             params = {
@@ -131,32 +137,26 @@ def optimize_hyperparameters(model_type, X_train, y_train, n_trials=100, cv=5, m
 
         elif model_type == 'mlp':
             model_cls = MLPClassifier
-            hidden_layer_sizes = []
-            n_layers = trial.suggest_int('n_layers', 1, 3)
-            for i in range(n_layers):
-                hidden_layer_sizes.append(trial.suggest_int(f'n_units_l{i}', 32, 256))
-
             params = {
-                'hidden_layer_sizes': tuple(hidden_layer_sizes),
-                'learning_rate_init': trial.suggest_float('learning_rate_init', 0.0001, 0.1, log=True),
-                'alpha': trial.suggest_float('alpha', 0.0001, 0.01, log=True),
-                'batch_size': trial.suggest_categorical('batch_size', ['auto', 64, 128, 256]),
-                'activation': trial.suggest_categorical('activation', ['relu', 'tanh', 'logistic']),
-                'solver': trial.suggest_categorical('solver', ['adam', 'sgd']),
-                'max_iter': 500,
+                'hidden_layer_sizes': (64,),  # Single hidden layer with fixed size
+                'learning_rate_init': trial.suggest_float('learning_rate_init', 0.0001, 0.005, log=True),
+                'alpha': trial.suggest_float('alpha', 0.005, 0.1, log=True),
+                'batch_size': 'auto',  # Use auto batch size
+                'activation': 'relu',  # Use only relu activation
+                'solver': 'adam',
+                'max_iter': 200,  # Further reduced iterations
+                'early_stopping': True,
+                'n_iter_no_change': 5,  # Fewer iterations without improvement
+                'tol': 1e-3,  # Less strict tolerance
                 'random_state': run_seed
             }
         else:
             raise ValueError(f"Unsupported model type: {model_type}")
 
-        # Create model with parameters
         model = model_cls(**params)
         
-        # If NaN values are present, create a pipeline with imputation
         if has_nan:
-            # Create imputer
             imputer = SimpleImputer(strategy='mean')
-            # Create pipeline with imputer and model
             pipeline = Pipeline(steps=[
                 ('imputer', imputer),
                 ('model', model)
@@ -165,22 +165,49 @@ def optimize_hyperparameters(model_type, X_train, y_train, n_trials=100, cv=5, m
         else:
             model_to_evaluate = model
 
-        if metric == 'accuracy':
-            scores = cross_val_score(model_to_evaluate, X_train, y_train, cv=skf, scoring='accuracy', error_score='raise') 
-        elif metric == 'f1':
-            scores = cross_val_score(model_to_evaluate, X_train, y_train, cv=skf, scoring='f1', error_score='raise') 
+        try:
+            if metric == 'accuracy':
+                scores = cross_val_score(model_to_evaluate, X_train, y_train, cv=skf, scoring='accuracy', error_score='raise') 
+            elif metric == 'f1':
+                scores = cross_val_score(model_to_evaluate, X_train, y_train, cv=skf, scoring='f1', error_score='raise') 
+            
+            if time.time() - start_time > max_trial_time:
+                print(f"Trial exceeded time limit of {max_trial_time} seconds")
+                return float('-inf')
+                
+            return scores.mean()
+        except ValueError as e:
+            if "non-finite parameter weights" in str(e) or "contains large values" in str(e):
+                return float('-inf')
+            else:
+                raise
+        except Exception as e:
+            print(f"Unexpected error in trial: {str(e)}")
+            return float('-inf')
 
-        return scores.mean()
+    # study = optuna.create_study(
+    #     direction='maximize',
+    #     sampler=optuna.samplers.TPESampler(seed=run_seed),
+    # )
 
+    # with suppress_stdout_stderr():
+    #     study.optimize(
+    #         objective_cv,
+    #         n_trials=n_trials,
+    #         show_progress_bar=False,
+    #         n_jobs=1  
+    #     )
     study = optuna.create_study(
         direction='maximize',
         sampler=optuna.samplers.TPESampler(seed=run_seed),
+        pruner=MedianPruner(n_startup_trials=5, n_warmup_steps=30),  # Add pruning to stop unpromising trials
     )
 
     with suppress_stdout_stderr():
         study.optimize(
             objective_cv,
             n_trials=n_trials,
+            timeout=3600,  # 1 hour total timeout for all trials
             show_progress_bar=False,
             n_jobs=1  
         )
@@ -277,19 +304,17 @@ def evaluate_model(model_type, best_params, X_train, y_train, X_test, y_test, ou
             silent=True
         )
     elif model_type == 'mlp':
-        hidden_layer_sizes = []
-        n_layers = best_params.get('n_layers', 1)
-        for i in range(n_layers):
-            hidden_layer_sizes.append(best_params.get(f'n_units_l{i}', 100))
-
         model = MLPClassifier(
-            hidden_layer_sizes=tuple(hidden_layer_sizes),
+            hidden_layer_sizes=(64,),  # Single hidden layer with fixed size
             learning_rate_init=best_params.get('learning_rate_init', 0.001),
-            alpha=best_params.get('alpha', 0.0001),
-            batch_size=best_params.get('batch_size', 'auto'),
-            activation=best_params.get('activation', 'relu'),
-            solver=best_params.get('solver', 'adam'),
-            max_iter=500,
+            alpha=best_params.get('alpha', 0.01),
+            batch_size='auto',
+            activation='relu',
+            solver='adam',
+            max_iter=200,
+            early_stopping=True,
+            n_iter_no_change=5,
+            tol=1e-3,
             random_state=run_seed  
         )
     else:

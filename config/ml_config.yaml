@@ -24,8 +24,8 @@ feature_selection:
   save_plots: False
 
 hyperparameter_tuning:
-  models: ["mlp", "xgbrf", "lgbm", "svc"]  # "mlp", "rf", "lgbm", "xgbrf", "dt", "svc" #"mlp", "xgbrf", "lgbm", 
-  n_trials: 50 
+  models: ["mlp"]  # "mlp", "rf", "lgbm", "xgbrf", "dt", "svc" #"mlp", "xgbrf", "lgbm", 
+  n_trials: 1 
   cv: 3
   metric: "accuracy"
   output_dir: "./results_wo_fs_mv"
